@@ -32,7 +32,7 @@ sudo ./install.sh
 Then edit `/boot/armbianEnv.txt`:
 
 ```ini
-fdtfile=rockchip/rk3568-odroid-m1.no-skip-mmu-read.dtb
+fdtfile=rockchip/rk3568-odroid-m1-npu.dtb
 user_overlays=rknpu
 ```
 
