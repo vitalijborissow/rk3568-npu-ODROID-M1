@@ -37,7 +37,7 @@
 | 16 | Hardware resets | ✅ Working | 2026-02-26 | `srst_a`, `srst_h` via reset_control API |
 | 17 | NPU IRQ | ✅ Working | 2026-02-26 | GICv3 SPI 151 (0x97), shared with IOMMU |
 | 18 | SRAM hardware | ✅ Working | 2026-02-26 | 44 KB SRAM at 0xFDCC0000–0xFDCCB000. Split between NPU and rkvdec via `RKNPU_SRAM_PERCENT`. |
-| 19 | Thermal throttling | ✅ Working | 2026-02-26 | Bound to gpu-thermal trip 1 (75°C passive). max_state=7. Throttles NPU freq on overheat. |
+| 19 | Thermal throttling | ✅ Working | 2026-02-27 | Bound to both cpu-thermal + gpu-thermal trip 1 (75°C). 2 TSADC sensors (CPU ch0, GPU ch1), no NPU sensor. max_state=7. |
 
 ---
 
