@@ -8,12 +8,24 @@
 #include <linux/delay.h>
 #include <linux/jiffies.h>
 #include <linux/scatterlist.h>
+#include <linux/moduleparam.h>
 
 #include "rknpu_iommu.h"
 
 #define RKNPU_SWITCH_DOMAIN_WAIT_TIME_MS 6000
 
+#ifdef RKNPU_DKMS
+static unsigned int dkms_iova_dma_limit;
+module_param(dkms_iova_dma_limit, uint, 0644);
+MODULE_PARM_DESC(
+	dkms_iova_dma_limit,
+	"DKMS: cap IOMMU IOVA allocation limit for rknpu (0=disabled; e.g. 0x7fffffff to force <2GiB)"
+);
+#endif
+
+#if KERNEL_VERSION(6, 5, 0) <= LINUX_VERSION_CODE
 #define sg_is_dma_bus_address(sg) sg_dma_is_bus_address(sg)
+#endif
 
 dma_addr_t rknpu_iommu_dma_alloc_iova(struct iommu_domain *domain, size_t size,
 				      u64 dma_limit, struct device *dev,
@@ -29,13 +41,38 @@ dma_addr_t rknpu_iommu_dma_alloc_iova(struct iommu_domain *domain, size_t size,
 	shift = iova_shift(iovad);
 	iova_len = size >> shift;
 
+#if KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE
+	/*
+	 * Freeing non-power-of-two-sized allocations back into the IOVA caches
+	 * will come back to bite us badly, so we have to waste a bit of space
+	 * rounding up anything cacheable to make sure that can't happen. The
+	 * order of the unadjusted size will still match upon freeing.
+	 */
+	if (iova_len < (1 << (IOVA_RANGE_CACHE_MAX_SIZE - 1)))
+		iova_len = roundup_pow_of_two(iova_len);
+#endif
+
+#if (KERNEL_VERSION(5, 10, 0) <= LINUX_VERSION_CODE)
 	dma_limit = min_not_zero(dma_limit, dev->bus_dma_limit);
+#else
+	if (dev->bus_dma_mask)
+		dma_limit &= dev->bus_dma_mask;
+#endif
+
+#ifdef RKNPU_DKMS
+	if (dkms_iova_dma_limit)
+		dma_limit = min_t(u64, dma_limit, (u64)dkms_iova_dma_limit);
+#endif
 
 	if (domain->geometry.force_aperture)
 		dma_limit =
 			min_t(u64, dma_limit, domain->geometry.aperture_end);
 
+#if (KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE)
 	limit_pfn = dma_limit >> shift;
+#else
+	limit_pfn = min_t(dma_addr_t, dma_limit >> shift, iovad->end_pfn);
+#endif
 
 	if (alloc_fast) {
 		iova = alloc_iova_fast(iovad, iova_len, limit_pfn, true);
@@ -95,7 +132,9 @@ static int __finalise_sg(struct device *dev, struct scatterlist *sg, int nents,
 
 	for_each_sg(sg, s, nents, i) {
 		/* Restore this segment's original unaligned fields first */
+#if KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
 		dma_addr_t s_dma_addr = sg_dma_address(s);
+#endif
 		unsigned int s_iova_off = sg_dma_address(s);
 		unsigned int s_length = sg_dma_len(s);
 		unsigned int s_iova_len = s->length;
@@ -103,6 +142,7 @@ static int __finalise_sg(struct device *dev, struct scatterlist *sg, int nents,
 		sg_dma_address(s) = DMA_MAPPING_ERROR;
 		sg_dma_len(s) = 0;
 
+#if KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
 		if (sg_is_dma_bus_address(s)) {
 			if (i > 0)
 				cur = sg_next(cur);
@@ -115,6 +155,7 @@ static int __finalise_sg(struct device *dev, struct scatterlist *sg, int nents,
 			cur_len = 0;
 			continue;
 		}
+#endif
 
 		s->offset += s_iova_off;
 		s->length = s_length;
@@ -158,6 +199,7 @@ static void __invalidate_sg(struct scatterlist *sg, int nents)
 	struct scatterlist *s;
 	int i;
 
+#if KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
 	for_each_sg(sg, s, nents, i) {
 		if (sg_is_dma_bus_address(s)) {
 			sg_dma_unmark_bus_address(s);
@@ -170,6 +212,16 @@ static void __invalidate_sg(struct scatterlist *sg, int nents)
 		sg_dma_address(s) = DMA_MAPPING_ERROR;
 		sg_dma_len(s) = 0;
 	}
+#else
+	for_each_sg(sg, s, nents, i) {
+		if (sg_dma_address(s) != DMA_MAPPING_ERROR)
+			s->offset += sg_dma_address(s);
+		if (sg_dma_len(s))
+			s->length = sg_dma_len(s);
+		sg_dma_address(s) = DMA_MAPPING_ERROR;
+		sg_dma_len(s) = 0;
+	}
+#endif
 }
 
 int rknpu_iommu_dma_map_sg(struct device *dev, struct scatterlist *sg,
@@ -242,7 +294,11 @@ int rknpu_iommu_dma_map_sg(struct device *dev, struct scatterlist *sg,
 		goto out_restore_sg;
 	}
 
+#if KERNEL_VERSION(6, 3, 0) <= LINUX_VERSION_CODE
 	ret = iommu_map_sg(domain, iova, sg, nents, prot, GFP_KERNEL);
+#else
+	ret = iommu_map_sg(domain, iova, sg, nents, prot);
+#endif
 	if (ret < 0 || ret < iova_len) {
 		LOG_ERROR("failed to map SG: %zd\n", ret);
 		goto out_free_iova;
@@ -279,6 +335,7 @@ void rknpu_iommu_dma_unmap_sg(struct device *dev, struct scatterlist *sg,
 	if (iova_aligned)
 		return dma_unmap_sg(dev, sg, nents, dir);
 
+#if KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
 	/*
 	 * The scatterlist segments are mapped into a single
 	 * contiguous IOVA allocation, the start and end points
@@ -309,6 +366,15 @@ void rknpu_iommu_dma_unmap_sg(struct device *dev, struct scatterlist *sg,
 
 		end = sg_dma_address(tmp) + sg_dma_len(tmp);
 	}
+#else
+	start = sg_dma_address(sg);
+	for_each_sg(sg_next(sg), tmp, nents - 1, i) {
+		if (sg_dma_len(tmp) == 0)
+			break;
+		sg = tmp;
+	}
+	end = sg_dma_address(sg) + sg_dma_len(sg);
+#endif
 
 	dma_addr = start;
 	size = end - start;
@@ -324,6 +390,7 @@ void rknpu_iommu_dma_unmap_sg(struct device *dev, struct scatterlist *sg,
 
 #if defined(CONFIG_IOMMU_API) && defined(CONFIG_NO_GKI) && !defined(CONFIG_ARM)
 
+#if KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
 struct iommu_group {
 	struct kobject kobj;
 	struct kobject *devices_kobj;
@@ -343,6 +410,22 @@ struct iommu_group {
 	unsigned int owner_cnt;
 	void *owner;
 };
+#else
+struct iommu_group {
+	struct kobject kobj;
+	struct kobject *devices_kobj;
+	struct list_head devices;
+	struct mutex mutex;
+	struct blocking_notifier_head notifier;
+	void *iommu_data;
+	void (*iommu_data_release)(void *iommu_data);
+	char *name;
+	int id;
+	struct iommu_domain *default_domain;
+	struct iommu_domain *domain;
+	struct list_head entry;
+};
+#endif
 
 int rknpu_iommu_init_domain(struct rknpu_device *rknpu_dev)
 {
@@ -434,6 +517,9 @@ int rknpu_iommu_switch_domain(struct rknpu_device *rknpu_dev, int domain_id)
 		// set domain type to dma domain
 		dst_domain->type |= __IOMMU_DOMAIN_DMA_API;
 		// iommu dma init domain
+#if KERNEL_VERSION(6, 10, 0) > LINUX_VERSION_CODE
+		iommu_setup_dma_ops(rknpu_dev->dev, 0, 1ULL << 32);
+#endif
 
 		rknpu_dev->iommu_domain_id = domain_id;
 		rknpu_dev->iommu_domains[domain_id] = dst_domain;

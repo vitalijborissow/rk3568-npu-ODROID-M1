@@ -28,7 +28,8 @@ int rknpu_mm_create(unsigned int mem_size, unsigned int chunk_size,
 	(*mm)->total_chunks = mem_size / chunk_size;
 	(*mm)->free_chunks = (*mm)->total_chunks;
 
-	num_of_longs = BITS_TO_LONGS((*mm)->total_chunks);
+	num_of_longs =
+		((*mm)->total_chunks + BITS_PER_LONG - 1) / BITS_PER_LONG;
 
 	(*mm)->bitmap = kcalloc(num_of_longs, sizeof(long), GFP_KERNEL);
 	if (!(*mm)->bitmap) {
@@ -60,47 +61,93 @@ void rknpu_mm_destroy(struct rknpu_mm *mm)
 int rknpu_mm_alloc(struct rknpu_mm *mm, unsigned int size,
 		   struct rknpu_mm_obj **mm_obj)
 {
-	unsigned int num_chunks;
-	unsigned long found;
+	unsigned int found, start_search, cur_size;
 
 	if (size == 0)
 		return -EINVAL;
 
-	num_chunks = DIV_ROUND_UP(size, mm->chunk_size);
-	if (num_chunks > mm->total_chunks)
+	if (size > mm->total_chunks * mm->chunk_size)
 		return -ENOMEM;
 
 	*mm_obj = kzalloc(sizeof(struct rknpu_mm_obj), GFP_KERNEL);
 	if (!(*mm_obj))
 		return -ENOMEM;
 
+	start_search = 0;
+
 	mutex_lock(&mm->lock);
 
-	found = bitmap_find_next_zero_area(mm->bitmap, mm->total_chunks,
-					   0, num_chunks, 0);
-	if (found >= mm->total_chunks) {
-		mutex_unlock(&mm->lock);
-		kfree(*mm_obj);
-		return -ENOMEM;
+mm_restart_search:
+	/* Find the first chunk that is free */
+	found = find_next_zero_bit(mm->bitmap, mm->total_chunks, start_search);
+
+	/* If there wasn't any free chunk, bail out */
+	if (found == mm->total_chunks)
+		goto mm_no_free_chunk;
+
+	/* Update fields of mm_obj */
+	(*mm_obj)->range_start = found;
+	(*mm_obj)->range_end = found;
+
+	/* If we need only one chunk, mark it as allocated and get out */
+	if (size <= mm->chunk_size) {
+		set_bit(found, mm->bitmap);
+		goto mm_out;
 	}
 
-	bitmap_set(mm->bitmap, found, num_chunks);
-	mm->free_chunks -= num_chunks;
+	/* Otherwise, try to see if we have enough contiguous chunks */
+	cur_size = size - mm->chunk_size;
+	do {
+		(*mm_obj)->range_end = find_next_zero_bit(
+			mm->bitmap, mm->total_chunks, ++found);
+		/*
+		 * If next free chunk is not contiguous than we need to
+		 * restart our search from the last free chunk we found (which
+		 * wasn't contiguous to the previous ones
+		 */
+		if ((*mm_obj)->range_end != found) {
+			start_search = found;
+			goto mm_restart_search;
+		}
 
+		/*
+		 * If we reached end of buffer, bail out with error
+		 */
+		if (found == mm->total_chunks)
+			goto mm_no_free_chunk;
+
+		/* Check if we don't need another chunk */
+		if (cur_size <= mm->chunk_size)
+			cur_size = 0;
+		else
+			cur_size -= mm->chunk_size;
+
+	} while (cur_size > 0);
+
+	/* Mark the chunks as allocated */
+	for (found = (*mm_obj)->range_start; found <= (*mm_obj)->range_end;
+	     found++)
+		set_bit(found, mm->bitmap);
+
+mm_out:
+	mm->free_chunks -= ((*mm_obj)->range_end - (*mm_obj)->range_start + 1);
 	mutex_unlock(&mm->lock);
-
-	(*mm_obj)->range_start = found;
-	(*mm_obj)->range_end = found + num_chunks - 1;
 
 	LOG_DEBUG("mm allocate, mm_obj: %p, range_start: %d, range_end: %d\n",
 		  *mm_obj, (*mm_obj)->range_start, (*mm_obj)->range_end);
 
 	return 0;
+
+mm_no_free_chunk:
+	mutex_unlock(&mm->lock);
+	kfree(*mm_obj);
+
+	return -ENOMEM;
 }
 
 int rknpu_mm_free(struct rknpu_mm *mm, struct rknpu_mm_obj *mm_obj)
 {
-	unsigned int count;
+	unsigned int bit;
 
 	/* Act like kfree when trying to free a NULL object */
 	if (!mm_obj)
@@ -109,11 +156,14 @@ int rknpu_mm_free(struct rknpu_mm *mm, struct rknpu_mm_obj *mm_obj)
 	LOG_DEBUG("mm free, mem_obj: %p, range_start: %d, range_end: %d\n",
 		  mm_obj, mm_obj->range_start, mm_obj->range_end);
 
-	count = mm_obj->range_end - mm_obj->range_start + 1;
-
 	mutex_lock(&mm->lock);
-	bitmap_clear(mm->bitmap, mm_obj->range_start, count);
-	mm->free_chunks += count;
+
+	/* Mark the chunks as free */
+	for (bit = mm_obj->range_start; bit <= mm_obj->range_end; bit++)
+		clear_bit(bit, mm->bitmap);
+
+	mm->free_chunks += (mm_obj->range_end - mm_obj->range_start + 1);
+
 	mutex_unlock(&mm->lock);
 
 	kfree(mm_obj);

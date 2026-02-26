@@ -13,6 +13,10 @@
 #include <linux/iova.h>
 #include <linux/version.h>
 
+#if KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE
+#include <linux/dma-iommu.h>
+#endif
+
 #include "rknpu_drv.h"
 
 enum iommu_dma_cookie_type {
@@ -49,6 +53,8 @@ int rknpu_iommu_domain_get_and_switch(struct rknpu_device *rknpu_dev,
 				      int domain_id);
 int rknpu_iommu_domain_put(struct rknpu_device *rknpu_dev);
 
+#if KERNEL_VERSION(5, 10, 0) < LINUX_VERSION_CODE
 int iommu_get_dma_cookie(struct iommu_domain *domain);
+#endif
 
 #endif

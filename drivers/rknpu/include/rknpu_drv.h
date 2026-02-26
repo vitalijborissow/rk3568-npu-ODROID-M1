@@ -7,11 +7,6 @@
 #ifndef __LINUX_RKNPU_DRV_H_
 #define __LINUX_RKNPU_DRV_H_
 
-/* DKMS misc device support - centralized define (was duplicated in 7 .c files) */
-#if defined(RKNPU_DKMS_MISCDEV) && !defined(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP)
-#define RKNPU_DKMS_MISCDEV_ENABLED 1
-#endif
-
 #include <linux/completion.h>
 #include <linux/device.h>
 #include <linux/kref.h>
@@ -23,9 +18,25 @@
 #include <linux/hrtimer.h>
 #include <linux/miscdevice.h>
 
+#ifndef RKNPU_DKMS
 #include <soc/rockchip/rockchip_opp_select.h>
 #include <soc/rockchip/rockchip_system_monitor.h>
 #include <soc/rockchip/rockchip_ipa.h>
+#else
+struct monitor_dev_info;
+struct ipa_power_model_data;
+struct thermal_cooling_device;
+struct devfreq;
+struct rockchip_opp_info {
+	int dummy;
+};
+#endif
+
+#ifdef RKNPU_DKMS
+#ifdef CONFIG_ROCKCHIP_RKNPU_DMA_HEAP
+#undef CONFIG_ROCKCHIP_RKNPU_DMA_HEAP
+#endif
+#endif
 
 #include "rknpu_job.h"
 #include "rknpu_fence.h"
@@ -34,7 +45,7 @@
 
 #define DRIVER_NAME "rknpu"
 #define DRIVER_DESC "RKNPU driver"
-#define DRIVER_DATE "20260212"
+#define DRIVER_DATE "20240828"
 #define DRIVER_MAJOR 0
 #define DRIVER_MINOR 9
 #define DRIVER_PATCHLEVEL 8
@@ -45,7 +56,11 @@
 #define RKNPU_LOAD_INTERVAL 1000000000
 
 #define LOG_INFO(fmt, args...) pr_info(LOG_TAG ": " fmt, ##args)
+#if KERNEL_VERSION(5, 5, 0) <= LINUX_VERSION_CODE
 #define LOG_WARN(fmt, args...) pr_warn(LOG_TAG ": " fmt, ##args)
+#else
+#define LOG_WARN(fmt, args...) pr_warning(LOG_TAG ": " fmt, ##args)
+#endif
 #define LOG_DEBUG(fmt, args...) pr_devel(LOG_TAG ": " fmt, ##args)
 #define LOG_ERROR(fmt, args...) pr_err(LOG_TAG ": " fmt, ##args)
 
@@ -117,11 +132,11 @@ struct rknpu_device {
 	struct device *fake_dev;
 	struct drm_device *drm_dev;
 #endif
-#if defined(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP)
+#if defined(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP) || defined(RKNPU_DKMS_MISCDEV)
 	struct miscdevice miscdev;
+#ifdef CONFIG_ROCKCHIP_RKNPU_DMA_HEAP
 	struct rk_dma_heap *heap;
-#elif defined(RKNPU_DKMS_MISCDEV_ENABLED)
-	struct miscdevice miscdev;
+#endif
 #endif
 	atomic_t sequence;
 	spinlock_t lock;
@@ -159,7 +174,6 @@ struct rknpu_device {
 	atomic_t cmdline_power_refcount;
 	struct delayed_work power_off_work;
 	struct workqueue_struct *power_off_wq;
-	struct workqueue_struct *job_wq;
 	struct rknpu_debugger debugger;
 	struct hrtimer timer;
 	ktime_t kt;
@@ -173,12 +187,9 @@ struct rknpu_device {
 	void __iomem *nbuf_base_io;
 	struct rknpu_mm *sram_mm;
 	unsigned long power_put_delay;
-	ktime_t devfreq_last_busy;
-	ktime_t devfreq_last_status;
-	unsigned long devfreq_busy_ns;
-	unsigned long devfreq_total_ns;
-	struct clk *scmi_clk;
 	struct iommu_group *iommu_group;
+	struct device *iommu_pm_dev;
+	bool iommu_pm_held;
 	int iommu_domain_num;
 	int iommu_domain_id;
 	struct iommu_domain *iommu_domains[RKNPU_MAX_IOMMU_DOMAIN_NUM];

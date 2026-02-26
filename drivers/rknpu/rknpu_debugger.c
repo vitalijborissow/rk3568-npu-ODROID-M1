@@ -13,56 +13,20 @@
 #include <linux/clk.h>
 #include <asm/div64.h>
 
+#ifndef FPGA_PLATFORM
 #ifdef CONFIG_PM_DEVFREQ
 #ifndef RKNPU_DKMS
 #include <../drivers/devfreq/governor.h>
+#endif
 #endif
 #endif
 
 #include "rknpu_drv.h"
 #include "rknpu_mm.h"
 #include "rknpu_reset.h"
-#include "rknpu_job.h"
 #include "rknpu_debugger.h"
 
 #define RKNPU_DEBUGGER_ROOT_NAME "rknpu"
-
-/*
- * Safe helper to get rknpu_device from seq_file.
- * Returns NULL if any pointer in the chain is invalid.
- */
-static inline struct rknpu_device *rknpu_dev_from_seq(struct seq_file *m)
-{
-	struct rknpu_debugger_node *node;
-	struct rknpu_debugger *debugger;
-
-	if (!m || !m->private)
-		return NULL;
-	node = m->private;
-	debugger = node->debugger;
-	if (!debugger)
-		return NULL;
-	return container_of(debugger, struct rknpu_device, debugger);
-}
-
-/* Same helper for file-based writers */
-static inline struct rknpu_device *rknpu_dev_from_file(struct file *file)
-{
-	struct seq_file *priv;
-	struct rknpu_debugger_node *node;
-	struct rknpu_debugger *debugger;
-
-	if (!file || !file->private_data)
-		return NULL;
-	priv = file->private_data;
-	if (!priv->private)
-		return NULL;
-	node = priv->private;
-	debugger = node->debugger;
-	if (!debugger)
-		return NULL;
-	return container_of(debugger, struct rknpu_device, debugger);
-}
 
 #if defined(CONFIG_ROCKCHIP_RKNPU_DEBUG_FS) ||                                 \
 	defined(CONFIG_ROCKCHIP_RKNPU_PROC_FS)
@@ -76,17 +40,15 @@ static int rknpu_version_show(struct seq_file *m, void *data)
 
 static int rknpu_load_show(struct seq_file *m, void *data)
 {
-	struct rknpu_device *rknpu_dev = rknpu_dev_from_seq(m);
+	struct rknpu_debugger_node *node = m->private;
+	struct rknpu_debugger *debugger = node->debugger;
+	struct rknpu_device *rknpu_dev =
+		container_of(debugger, struct rknpu_device, debugger);
 	struct rknpu_subcore_data *subcore_data = NULL;
 	unsigned long flags;
 	int i;
 	int load;
 	uint64_t total_busy_time, div_value;
-
-	if (!rknpu_dev || !rknpu_dev->config) {
-		seq_puts(m, "NPU load: unavailable (device not ready)\n");
-		return 0;
-	}
 
 	seq_puts(m, "NPU load: ");
 	for (i = 0; i < rknpu_dev->config->num_irqs; i++) {
@@ -117,12 +79,10 @@ static int rknpu_load_show(struct seq_file *m, void *data)
 
 static int rknpu_power_show(struct seq_file *m, void *data)
 {
-	struct rknpu_device *rknpu_dev = rknpu_dev_from_seq(m);
-
-	if (!rknpu_dev) {
-		seq_puts(m, "unavailable\n");
-		return 0;
-	}
+	struct rknpu_debugger_node *node = m->private;
+	struct rknpu_debugger *debugger = node->debugger;
+	struct rknpu_device *rknpu_dev =
+		container_of(debugger, struct rknpu_device, debugger);
 
 	if (atomic_read(&rknpu_dev->power_refcount) > 0)
 		seq_puts(m, "on\n");
@@ -135,11 +95,12 @@ static int rknpu_power_show(struct seq_file *m, void *data)
 static ssize_t rknpu_power_set(struct file *file, const char __user *ubuf,
 			       size_t len, loff_t *offp)
 {
-	struct rknpu_device *rknpu_dev = rknpu_dev_from_file(file);
+	struct seq_file *priv = file->private_data;
+	struct rknpu_debugger_node *node = priv->private;
+	struct rknpu_debugger *debugger = node->debugger;
+	struct rknpu_device *rknpu_dev =
+		container_of(debugger, struct rknpu_device, debugger);
 	char buf[8];
-
-	if (!rknpu_dev)
-		return -ENODEV;
 
 	if (len > sizeof(buf) - 1)
 		return -EINVAL;
@@ -150,6 +111,7 @@ static ssize_t rknpu_power_set(struct file *file, const char __user *ubuf,
 	if (strcmp(buf, "on") == 0) {
 		atomic_inc(&rknpu_dev->cmdline_power_refcount);
 		rknpu_power_get(rknpu_dev);
+		LOG_INFO("rknpu power is on!");
 	} else if (strcmp(buf, "off") == 0) {
 		if (atomic_read(&rknpu_dev->power_refcount) > 0 &&
 		    atomic_dec_if_positive(
@@ -160,6 +122,8 @@ static ssize_t rknpu_power_set(struct file *file, const char __user *ubuf,
 			atomic_set(&rknpu_dev->cmdline_power_refcount, 0);
 			rknpu_power_put(rknpu_dev);
 		}
+		if (atomic_read(&rknpu_dev->power_refcount) <= 0)
+			LOG_INFO("rknpu power is off!");
 	} else {
 		LOG_ERROR("rknpu power node params is invalid!");
 	}
@@ -169,12 +133,10 @@ static ssize_t rknpu_power_set(struct file *file, const char __user *ubuf,
 
 static int rknpu_power_put_delay_show(struct seq_file *m, void *data)
 {
-	struct rknpu_device *rknpu_dev = rknpu_dev_from_seq(m);
-
-	if (!rknpu_dev) {
-		seq_puts(m, "unavailable\n");
-		return 0;
-	}
+	struct rknpu_debugger_node *node = m->private;
+	struct rknpu_debugger *debugger = node->debugger;
+	struct rknpu_device *rknpu_dev =
+		container_of(debugger, struct rknpu_device, debugger);
 
 	seq_printf(m, "%lu\n", rknpu_dev->power_put_delay);
 
@@ -185,13 +147,14 @@ static ssize_t rknpu_power_put_delay_set(struct file *file,
 					 const char __user *ubuf, size_t len,
 					 loff_t *offp)
 {
-	struct rknpu_device *rknpu_dev = rknpu_dev_from_file(file);
+	struct seq_file *priv = file->private_data;
+	struct rknpu_debugger_node *node = priv->private;
+	struct rknpu_debugger *debugger = node->debugger;
+	struct rknpu_device *rknpu_dev =
+		container_of(debugger, struct rknpu_device, debugger);
 	char buf[16];
 	unsigned long power_put_delay = 0;
 	int ret = 0;
-
-	if (!rknpu_dev)
-		return -ENODEV;
 
 	if (len > sizeof(buf) - 1)
 		return -EINVAL;
@@ -207,18 +170,19 @@ static ssize_t rknpu_power_put_delay_set(struct file *file,
 
 	rknpu_dev->power_put_delay = power_put_delay;
 
+	LOG_INFO("set rknpu power put delay time %lums\n",
+		 rknpu_dev->power_put_delay);
+
 	return len;
 }
 
 static int rknpu_freq_show(struct seq_file *m, void *data)
 {
-	struct rknpu_device *rknpu_dev = rknpu_dev_from_seq(m);
+	struct rknpu_debugger_node *node = m->private;
+	struct rknpu_debugger *debugger = node->debugger;
+	struct rknpu_device *rknpu_dev =
+		container_of(debugger, struct rknpu_device, debugger);
 	unsigned long current_freq = 0;
-
-	if (!rknpu_dev || rknpu_dev->num_clks < 1) {
-		seq_puts(m, "unavailable\n");
-		return 0;
-	}
 
 	rknpu_power_get(rknpu_dev);
 
@@ -235,14 +199,15 @@ static int rknpu_freq_show(struct seq_file *m, void *data)
 static ssize_t rknpu_freq_set(struct file *file, const char __user *ubuf,
 			      size_t len, loff_t *offp)
 {
-	struct rknpu_device *rknpu_dev = rknpu_dev_from_file(file);
+	struct seq_file *priv = file->private_data;
+	struct rknpu_debugger_node *node = priv->private;
+	struct rknpu_debugger *debugger = node->debugger;
+	struct rknpu_device *rknpu_dev =
+		container_of(debugger, struct rknpu_device, debugger);
 	unsigned long current_freq = 0;
 	char buf[16];
 	unsigned long freq = 0;
 	int ret = 0;
-
-	if (!rknpu_dev)
-		return -ENODEV;
 
 	if (len > sizeof(buf) - 1)
 		return -EINVAL;
@@ -283,13 +248,11 @@ static ssize_t rknpu_freq_set(struct file *file, const char __user *ubuf,
 
 static int rknpu_volt_show(struct seq_file *m, void *data)
 {
-	struct rknpu_device *rknpu_dev = rknpu_dev_from_seq(m);
+	struct rknpu_debugger_node *node = m->private;
+	struct rknpu_debugger *debugger = node->debugger;
+	struct rknpu_device *rknpu_dev =
+		container_of(debugger, struct rknpu_device, debugger);
 	unsigned long current_volt = 0;
-
-	if (!rknpu_dev || !rknpu_dev->vdd || IS_ERR(rknpu_dev->vdd)) {
-		seq_puts(m, "unavailable\n");
-		return 0;
-	}
 
 	current_volt = regulator_get_voltage(rknpu_dev->vdd);
 
@@ -300,12 +263,10 @@ static int rknpu_volt_show(struct seq_file *m, void *data)
 
 static int rknpu_reset_show(struct seq_file *m, void *data)
 {
-	struct rknpu_device *rknpu_dev = rknpu_dev_from_seq(m);
-
-	if (!rknpu_dev) {
-		seq_puts(m, "unavailable\n");
-		return 0;
-	}
+	struct rknpu_debugger_node *node = m->private;
+	struct rknpu_debugger *debugger = node->debugger;
+	struct rknpu_device *rknpu_dev =
+		container_of(debugger, struct rknpu_device, debugger);
 
 	if (!rknpu_dev->bypass_soft_reset)
 		seq_puts(m, "on\n");
@@ -318,11 +279,12 @@ static int rknpu_reset_show(struct seq_file *m, void *data)
 static ssize_t rknpu_reset_set(struct file *file, const char __user *ubuf,
 			       size_t len, loff_t *offp)
 {
-	struct rknpu_device *rknpu_dev = rknpu_dev_from_file(file);
+	struct seq_file *priv = file->private_data;
+	struct rknpu_debugger_node *node = priv->private;
+	struct rknpu_debugger *debugger = node->debugger;
+	struct rknpu_device *rknpu_dev =
+		container_of(debugger, struct rknpu_device, debugger);
 	char buf[8];
-
-	if (!rknpu_dev)
-		return -ENODEV;
 
 	if (len > sizeof(buf) - 1)
 		return -EINVAL;
@@ -341,35 +303,6 @@ static ssize_t rknpu_reset_set(struct file *file, const char __user *ubuf,
 	return len;
 }
 
-static int rknpu_perf_show(struct seq_file *m, void *data)
-{
-	struct rknpu_device *rknpu_dev = rknpu_dev_from_seq(m);
-	uint32_t dt_wr = 0, dt_rd = 0, wt_rd = 0;
-	int ret;
-
-	if (!rknpu_dev) {
-		seq_puts(m, "unavailable\n");
-		return 0;
-	}
-
-	if (!rknpu_dev->config->amount_top) {
-		seq_puts(m, "not supported on this device\n");
-		return 0;
-	}
-
-	rknpu_power_get(rknpu_dev);
-	ret = rknpu_get_rw_amount(rknpu_dev, &dt_wr, &dt_rd, &wt_rd);
-	rknpu_power_put(rknpu_dev);
-
-	if (ret)
-		seq_printf(m, "error: %d\n", ret);
-	else
-		seq_printf(m, "dt_wr=%u dt_rd=%u wt_rd=%u total=%u\n",
-			   dt_wr, dt_rd, wt_rd, dt_wr + dt_rd + wt_rd);
-
-	return 0;
-}
-
 static struct rknpu_debugger_list rknpu_debugger_root_list[] = {
 	{ "version", rknpu_version_show, NULL, NULL },
 	{ "load", rknpu_load_show, NULL, NULL },
@@ -379,7 +312,6 @@ static struct rknpu_debugger_list rknpu_debugger_root_list[] = {
 	{ "delayms", rknpu_power_put_delay_show, rknpu_power_put_delay_set,
 	  NULL },
 	{ "reset", rknpu_reset_show, rknpu_reset_set, NULL },
-	{ "perf", rknpu_perf_show, NULL, NULL },
 #ifdef CONFIG_ROCKCHIP_RKNPU_SRAM
 	{ "mm", rknpu_mm_dump, NULL, NULL },
 #endif
@@ -420,7 +352,7 @@ static int rknpu_debugfs_remove_files(struct rknpu_debugger *debugger)
 	struct rknpu_debugger_node *pos, *q;
 	struct list_head *entry_list;
 
-	mutex_lock(&debugger->lock);
+	mutex_lock(&debugger->debugfs_lock);
 
 	/* Delete debugfs entry list */
 	entry_list = &debugger->debugfs_entry_list;
@@ -436,7 +368,7 @@ static int rknpu_debugfs_remove_files(struct rknpu_debugger *debugger)
 	debugfs_remove_recursive(debugger->debugfs_dir);
 	debugger->debugfs_dir = NULL;
 
-	mutex_unlock(&debugger->lock);
+	mutex_unlock(&debugger->debugfs_lock);
 
 	return 0;
 }
@@ -461,7 +393,7 @@ static int rknpu_debugfs_create_files(const struct rknpu_debugger_list *files,
 		tmp->info_ent = &files[i];
 		tmp->debugger = debugger;
 
-		ent = debugfs_create_file(files[i].name, S_IFREG | S_IRUGO | S_IWUSR,
+		ent = debugfs_create_file(files[i].name, S_IFREG | S_IRUGO,
 					  root, tmp, &rknpu_debugfs_fops);
 		if (!ent) {
 			LOG_ERROR("Cannot create /sys/kernel/debug/%pd/%s\n",
@@ -471,9 +403,9 @@ static int rknpu_debugfs_create_files(const struct rknpu_debugger_list *files,
 
 		tmp->dent = ent;
 
-		mutex_lock(&debugger->lock);
+		mutex_lock(&debugger->debugfs_lock);
 		list_add_tail(&tmp->list, &debugger->debugfs_entry_list);
-		mutex_unlock(&debugger->lock);
+		mutex_unlock(&debugger->debugfs_lock);
 	}
 
 	return 0;
@@ -495,20 +427,20 @@ static int rknpu_debugfs_remove(struct rknpu_debugger *debugger)
 
 static int rknpu_debugfs_init(struct rknpu_debugger *debugger)
 {
+	struct rknpu_device *rknpu_dev =
+		container_of(debugger, struct rknpu_device, debugger);
+	char dir_name[64];
 	int ret;
 
-	/* Check if debugfs directory already exists (created by rknpu_debugfs_ctrl) */
-	debugger->debugfs_dir = debugfs_lookup(RKNPU_DEBUGGER_ROOT_NAME, NULL);
-	if (!debugger->debugfs_dir) {
-		/* Create new directory */
-		debugger->debugfs_dir =
-			debugfs_create_dir(RKNPU_DEBUGGER_ROOT_NAME, NULL);
-		if (IS_ERR_OR_NULL(debugger->debugfs_dir)) {
-			LOG_ERROR("failed on mkdir /sys/kernel/debug/%s\n",
-				  RKNPU_DEBUGGER_ROOT_NAME);
-			debugger->debugfs_dir = NULL;
-			return -EIO;
-		}
+	/* Create unique directory name using device address to avoid conflicts */
+	snprintf(dir_name, sizeof(dir_name), "%s-%s",
+		 RKNPU_DEBUGGER_ROOT_NAME, dev_name(rknpu_dev->dev));
+
+	debugger->debugfs_dir = debugfs_create_dir(dir_name, NULL);
+	if (IS_ERR_OR_NULL(debugger->debugfs_dir)) {
+		LOG_ERROR("failed on mkdir /sys/kernel/debug/%s\n", dir_name);
+		debugger->debugfs_dir = NULL;
+		return -EIO;
 	}
 
 	ret = rknpu_debugfs_create_files(rknpu_debugger_root_list,
@@ -532,7 +464,11 @@ CREATE_FAIL:
 #ifdef CONFIG_ROCKCHIP_RKNPU_PROC_FS
 static int rknpu_procfs_open(struct inode *inode, struct file *file)
 {
+#if KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE
+	struct rknpu_debugger_node *node = PDE_DATA(inode);
+#else
 	struct rknpu_debugger_node *node = pde_data(inode);
+#endif
 
 	return single_open(file, node->info_ent->show, node);
 }
@@ -550,7 +486,7 @@ static int rknpu_procfs_remove_files(struct rknpu_debugger *debugger)
 	struct rknpu_debugger_node *pos, *q;
 	struct list_head *entry_list;
 
-	mutex_lock(&debugger->lock);
+	mutex_lock(&debugger->procfs_lock);
 
 	/* Delete procfs entry list */
 	entry_list = &debugger->procfs_entry_list;
@@ -566,7 +502,7 @@ static int rknpu_procfs_remove_files(struct rknpu_debugger *debugger)
 	proc_remove(debugger->procfs_dir);
 	debugger->procfs_dir = NULL;
 
-	mutex_unlock(&debugger->lock);
+	mutex_unlock(&debugger->procfs_lock);
 
 	return 0;
 }
@@ -590,7 +526,7 @@ static int rknpu_procfs_create_files(const struct rknpu_debugger_list *files,
 		tmp->info_ent = &files[i];
 		tmp->debugger = debugger;
 
-		ent = proc_create_data(files[i].name, S_IFREG | S_IRUGO | S_IWUSR, root,
+		ent = proc_create_data(files[i].name, S_IFREG | S_IRUGO, root,
 				       &rknpu_procfs_fops, tmp);
 		if (!ent) {
 			LOG_ERROR("Cannot create /proc/%s/%s\n",
@@ -600,9 +536,9 @@ static int rknpu_procfs_create_files(const struct rknpu_debugger_list *files,
 
 		tmp->pent = ent;
 
-		mutex_lock(&debugger->lock);
+		mutex_lock(&debugger->procfs_lock);
 		list_add_tail(&tmp->list, &debugger->procfs_entry_list);
-		mutex_unlock(&debugger->lock);
+		mutex_unlock(&debugger->procfs_lock);
 	}
 
 	return 0;
@@ -623,16 +559,20 @@ static int rknpu_procfs_remove(struct rknpu_debugger *debugger)
 
 static int rknpu_procfs_init(struct rknpu_debugger *debugger)
 {
+	struct rknpu_device *rknpu_dev =
+		container_of(debugger, struct rknpu_device, debugger);
+	char dir_name[64];
 	int ret;
 
-	/* Create procfs directory - use static name, only one instance per module */
-	debugger->procfs_dir = proc_mkdir(RKNPU_DEBUGGER_ROOT_NAME, NULL);
+	/* Create unique directory name using device address to avoid conflicts */
+	snprintf(dir_name, sizeof(dir_name), "%s-%s",
+		 RKNPU_DEBUGGER_ROOT_NAME, dev_name(rknpu_dev->dev));
+
+	debugger->procfs_dir = proc_mkdir(dir_name, NULL);
 	if (IS_ERR_OR_NULL(debugger->procfs_dir)) {
-		/* May already exist from previous load, try to use existing */
-		pr_warn("rknpu: /proc/%s may already exist, continuing\n",
-			RKNPU_DEBUGGER_ROOT_NAME);
+		pr_err("failed on mkdir /proc/%s\n", dir_name);
 		debugger->procfs_dir = NULL;
-		return 0;  /* Non-fatal - procfs is optional */
+		return -EIO;
 	}
 
 	ret = rknpu_procfs_create_files(rknpu_debugger_root_list,
@@ -654,12 +594,13 @@ CREATE_FAIL:
 
 int rknpu_debugger_init(struct rknpu_device *rknpu_dev)
 {
-	mutex_init(&rknpu_dev->debugger.lock);
 #ifdef CONFIG_ROCKCHIP_RKNPU_DEBUG_FS
+	mutex_init(&rknpu_dev->debugger.debugfs_lock);
 	INIT_LIST_HEAD(&rknpu_dev->debugger.debugfs_entry_list);
 	rknpu_debugfs_init(&rknpu_dev->debugger);
 #endif
 #ifdef CONFIG_ROCKCHIP_RKNPU_PROC_FS
+	mutex_init(&rknpu_dev->debugger.procfs_lock);
 	INIT_LIST_HEAD(&rknpu_dev->debugger.procfs_entry_list);
 	rknpu_procfs_init(&rknpu_dev->debugger);
 #endif

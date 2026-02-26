@@ -65,10 +65,6 @@ int rknpu_submit_ioctl(struct drm_device *dev, void *data,
 #if defined(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP) && !defined(RKNPU_DKMS)
 int rknpu_submit_ioctl(struct rknpu_device *rknpu_dev, unsigned long data);
 #endif
-#ifdef RKNPU_DKMS_MISCDEV
-int rknpu_submit_misc_ioctl(struct rknpu_device *rknpu_dev, struct file *file,
-			    unsigned long data);
-#endif
 
 int rknpu_get_hw_version(struct rknpu_device *rknpu_dev, uint32_t *version);
 

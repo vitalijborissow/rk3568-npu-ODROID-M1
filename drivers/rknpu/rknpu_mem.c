@@ -11,7 +11,9 @@
 #include <linux/rk-dma-heap.h>
 #endif
 
+#if KERNEL_VERSION(5, 10, 0) <= LINUX_VERSION_CODE
 #include <linux/dma-map-ops.h>
+#endif
 
 #include "rknpu_drv.h"
 #include "rknpu_ioctl.h"

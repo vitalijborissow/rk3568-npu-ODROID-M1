@@ -15,6 +15,10 @@
 #include <drm/drm_gem.h>
 #include <drm/drm_mode.h>
 
+#if KERNEL_VERSION(4, 14, 0) > LINUX_VERSION_CODE
+#include <drm/drm_mem_util.h>
+#endif
+
 #include "rknpu_mm.h"
 
 #define to_rknpu_obj(x) container_of(x, struct rknpu_gem_object, base)
@@ -92,7 +96,11 @@ int rknpu_gem_destroy_ioctl(struct drm_device *dev, void *data,
  */
 static inline void rknpu_gem_object_get(struct drm_gem_object *obj)
 {
+#if KERNEL_VERSION(4, 13, 0) < LINUX_VERSION_CODE
 	drm_gem_object_get(obj);
+#else
+	drm_gem_object_reference(obj);
+#endif
 }
 
 /*
@@ -101,7 +109,13 @@ static inline void rknpu_gem_object_get(struct drm_gem_object *obj)
  */
 static inline void rknpu_gem_object_put(struct drm_gem_object *obj)
 {
+#if KERNEL_VERSION(5, 9, 0) <= LINUX_VERSION_CODE
 	drm_gem_object_put(obj);
+#elif KERNEL_VERSION(4, 13, 0) < LINUX_VERSION_CODE
+	drm_gem_object_put_unlocked(obj);
+#else
+	drm_gem_object_unreference_unlocked(obj);
+#endif
 }
 
 /*
@@ -136,8 +150,21 @@ void rknpu_gem_free_object(struct drm_gem_object *obj);
 int rknpu_gem_dumb_create(struct drm_file *file_priv, struct drm_device *dev,
 			  struct drm_mode_create_dumb *args);
 
+#if KERNEL_VERSION(4, 19, 0) > LINUX_VERSION_CODE
+/* map memory region for drm framebuffer to user space. */
+int rknpu_gem_dumb_map_offset(struct drm_file *file_priv,
+			      struct drm_device *dev, uint32_t handle,
+			      uint64_t *offset);
+#endif
+
 /* page fault handler and mmap fault address(virtual) to physical memory. */
+#if KERNEL_VERSION(4, 15, 0) <= LINUX_VERSION_CODE
 vm_fault_t rknpu_gem_fault(struct vm_fault *vmf);
+#elif KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
+int rknpu_gem_fault(struct vm_fault *vmf);
+#else
+int rknpu_gem_fault(struct vm_area_struct *vma, struct vm_fault *vmf);
+#endif
 
 int rknpu_gem_mmap_obj(struct drm_gem_object *obj, struct vm_area_struct *vma);
 
@@ -145,30 +172,51 @@ int rknpu_gem_mmap_obj(struct drm_gem_object *obj, struct vm_area_struct *vma);
 int rknpu_gem_mmap(struct file *filp, struct vm_area_struct *vma);
 
 /* low-level interface prime helpers */
+#if KERNEL_VERSION(4, 13, 0) <= LINUX_VERSION_CODE
 struct drm_gem_object *rknpu_gem_prime_import(struct drm_device *dev,
 					      struct dma_buf *dma_buf);
+#endif
 struct sg_table *rknpu_gem_prime_get_sg_table(struct drm_gem_object *obj);
 struct drm_gem_object *
-rknpu_gem_prime_import_sg_table(struct drm_device *dev,
-				struct dma_buf_attachment *attach,
-				struct sg_table *sgt);
+rknpu_gem_prime_import_sg_table(struct drm_device *drm,
+					struct dma_buf_attachment *attach,
+					struct sg_table *sgt);
+#if KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE
+void *rknpu_gem_prime_vmap(struct drm_gem_object *obj);
+void rknpu_gem_prime_vunmap(struct drm_gem_object *obj, void *vaddr);
+#else
 int rknpu_gem_prime_vmap(struct drm_gem_object *obj, struct iosys_map *map);
 void rknpu_gem_prime_vunmap(struct drm_gem_object *obj, struct iosys_map *map);
+#endif
 int rknpu_gem_prime_mmap(struct drm_gem_object *obj,
 			 struct vm_area_struct *vma);
 
 int rknpu_gem_sync_ioctl(struct drm_device *dev, void *data,
 			 struct drm_file *file_priv);
 
+#ifdef RKNPU_DKMS
+dma_addr_t rknpu_dkms_find_gem_base_by_addr(dma_addr_t addr);
+struct rknpu_gem_object *
+rknpu_dkms_find_gem_obj_by_addr(dma_addr_t addr, dma_addr_t *base_out);
+#endif
+
 static inline void *rknpu_gem_alloc_page(size_t nr_pages)
 {
+#if KERNEL_VERSION(4, 13, 0) <= LINUX_VERSION_CODE
 	return kvmalloc_array(nr_pages, sizeof(struct page *),
 			      GFP_KERNEL | __GFP_ZERO);
+#else
+	return drm_calloc_large(nr_pages, sizeof(struct page *));
+#endif
 }
 
 static inline void rknpu_gem_free_page(void *pages)
 {
+#if KERNEL_VERSION(4, 13, 0) <= LINUX_VERSION_CODE
 	kvfree(pages);
+#else
+	drm_free_large(pages);
+#endif
 }
 
 #endif

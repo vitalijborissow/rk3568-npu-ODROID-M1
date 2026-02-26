@@ -16,13 +16,18 @@
  * or core.
  */
 struct rknpu_debugger {
-	struct mutex lock;
-	/* debugfs (/sys/kernel/debug/rknpu/) */
+#ifdef CONFIG_ROCKCHIP_RKNPU_DEBUG_FS
+	/* Directory of debugfs file */
 	struct dentry *debugfs_dir;
 	struct list_head debugfs_entry_list;
-	/* procfs (/proc/rknpu/) */
+	struct mutex debugfs_lock;
+#endif
+#ifdef CONFIG_ROCKCHIP_RKNPU_PROC_FS
+	/* Directory of procfs file */
 	struct proc_dir_entry *procfs_dir;
 	struct list_head procfs_entry_list;
+	struct mutex procfs_lock;
+#endif
 };
 
 /*
@@ -59,9 +64,19 @@ struct rknpu_debugger_list {
  */
 struct rknpu_debugger_node {
 	struct rknpu_debugger *debugger;
+
+	/* template for this node. */
 	const struct rknpu_debugger_list *info_ent;
+
+	/* Each Procfs/Debugfs file. */
+#ifdef CONFIG_ROCKCHIP_RKNPU_DEBUG_FS
 	struct dentry *dent;
+#endif
+
+#ifdef CONFIG_ROCKCHIP_RKNPU_PROC_FS
 	struct proc_dir_entry *pent;
+#endif
+
 	struct list_head list;
 };
 
@@ -70,4 +85,4 @@ struct rknpu_device;
 int rknpu_debugger_init(struct rknpu_device *rknpu_dev);
 int rknpu_debugger_remove(struct rknpu_device *rknpu_dev);
 
-#endif /* __LINUX_RKNPU_DEBUGGER_H_ */
+#endif /* __LINUX_RKNPU_FENCE_H_ */
