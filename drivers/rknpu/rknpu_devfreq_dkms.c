@@ -27,6 +27,7 @@
 
 #include <linux/clk.h>
 #include <linux/devfreq.h>
+#include <linux/devfreq_cooling.h>
 #include <linux/pm_opp.h>
 #include <linux/regulator/consumer.h>
 #include <linux/version.h>
@@ -385,11 +386,26 @@ int rknpu_devfreq_init(struct rknpu_device *rknpu_dev)
 
 	dev_info(dev, "RKNPU: devfreq active with simple_ondemand governor\n");
 
+	/* Register devfreq-cooling so thermal framework can throttle NPU */
+	rknpu_dev->devfreq_cooling =
+		of_devfreq_cooling_register(dev->of_node, rknpu_dev->devfreq);
+	if (IS_ERR(rknpu_dev->devfreq_cooling)) {
+		dev_dbg(dev, "devfreq-cooling not registered: %ld\n",
+			PTR_ERR(rknpu_dev->devfreq_cooling));
+		rknpu_dev->devfreq_cooling = NULL;
+	} else {
+		dev_info(dev, "RKNPU: thermal throttling enabled\n");
+	}
+
 	return 0;
 }
 
 void rknpu_devfreq_remove(struct rknpu_device *rknpu_dev)
 {
+	if (rknpu_dev->devfreq_cooling) {
+		devfreq_cooling_unregister(rknpu_dev->devfreq_cooling);
+		rknpu_dev->devfreq_cooling = NULL;
+	}
 	/* devm handles clock and devfreq cleanup */
 	rknpu_dev->scmi_clk = NULL;
 	rknpu_dev->devfreq = NULL;
