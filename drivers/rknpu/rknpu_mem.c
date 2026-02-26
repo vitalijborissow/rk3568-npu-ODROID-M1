@@ -12,6 +12,8 @@
 #include <linux/version.h>
 #include <linux/dma-buf.h>
 #include <linux/iosys-map.h>
+#include <linux/slab.h>
+#include <linux/scatterlist.h>
 #if defined(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP) && !defined(RKNPU_DKMS_MISCDEV)
 #include <linux/rk-dma-heap.h>
 #endif
@@ -80,6 +82,123 @@ static int kern_addr_valid(unsigned long addr)
 #endif
 
 #ifdef RKNPU_DKMS_MISCDEV
+
+/*
+ * DKMS direct allocation backend — replaces rk-dma-heap with
+ * dma_alloc_coherent + dma_buf_export so /dev/rknpu can allocate
+ * buffers directly (not import-only).
+ */
+struct rknpu_dkms_buf {
+	struct device *dev;
+	size_t size;
+	void *vaddr;
+	dma_addr_t dma_addr;
+};
+
+static struct sg_table *rknpu_dkms_buf_map(struct dma_buf_attachment *attach,
+					   enum dma_data_direction dir)
+{
+	struct rknpu_dkms_buf *buf = attach->dmabuf->priv;
+	struct sg_table *sgt;
+	int ret;
+
+	sgt = kzalloc(sizeof(*sgt), GFP_KERNEL);
+	if (!sgt)
+		return ERR_PTR(-ENOMEM);
+
+	ret = sg_alloc_table(sgt, 1, GFP_KERNEL);
+	if (ret) {
+		kfree(sgt);
+		return ERR_PTR(ret);
+	}
+
+	sg_set_page(sgt->sgl, virt_to_page(buf->vaddr), buf->size, 0);
+	sg_dma_address(sgt->sgl) = buf->dma_addr;
+	sg_dma_len(sgt->sgl) = buf->size;
+	sgt->nents = 1;
+
+	return sgt;
+}
+
+static void rknpu_dkms_buf_unmap(struct dma_buf_attachment *attach,
+				 struct sg_table *sgt,
+				 enum dma_data_direction dir)
+{
+	sg_free_table(sgt);
+	kfree(sgt);
+}
+
+static void rknpu_dkms_buf_release(struct dma_buf *dmabuf)
+{
+	struct rknpu_dkms_buf *buf = dmabuf->priv;
+
+	dma_free_coherent(buf->dev, buf->size, buf->vaddr, buf->dma_addr);
+	kfree(buf);
+}
+
+static int rknpu_dkms_buf_vmap(struct dma_buf *dmabuf, struct iosys_map *map)
+{
+	struct rknpu_dkms_buf *buf = dmabuf->priv;
+
+	iosys_map_set_vaddr(map, buf->vaddr);
+	return 0;
+}
+
+static void rknpu_dkms_buf_vunmap(struct dma_buf *dmabuf, struct iosys_map *map)
+{
+	iosys_map_clear(map);
+}
+
+static int rknpu_dkms_buf_mmap(struct dma_buf *dmabuf, struct vm_area_struct *vma)
+{
+	struct rknpu_dkms_buf *buf = dmabuf->priv;
+
+	return dma_mmap_coherent(buf->dev, vma, buf->vaddr,
+				 buf->dma_addr, buf->size);
+}
+
+static const struct dma_buf_ops rknpu_dkms_buf_ops = {
+	.map_dma_buf = rknpu_dkms_buf_map,
+	.unmap_dma_buf = rknpu_dkms_buf_unmap,
+	.release = rknpu_dkms_buf_release,
+	.vmap = rknpu_dkms_buf_vmap,
+	.vunmap = rknpu_dkms_buf_vunmap,
+	.mmap = rknpu_dkms_buf_mmap,
+};
+
+static struct dma_buf *rknpu_dkms_alloc(struct device *dev, size_t size)
+{
+	struct rknpu_dkms_buf *buf;
+	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
+	struct dma_buf *dmabuf;
+
+	buf = kzalloc(sizeof(*buf), GFP_KERNEL);
+	if (!buf)
+		return ERR_PTR(-ENOMEM);
+
+	buf->size = PAGE_ALIGN(size);
+	buf->dev = dev;
+	buf->vaddr = dma_alloc_coherent(dev, buf->size, &buf->dma_addr,
+					GFP_KERNEL | __GFP_DMA);
+	if (!buf->vaddr) {
+		kfree(buf);
+		return ERR_PTR(-ENOMEM);
+	}
+
+	exp_info.ops = &rknpu_dkms_buf_ops;
+	exp_info.size = buf->size;
+	exp_info.flags = O_CLOEXEC | O_RDWR;
+	exp_info.priv = buf;
+
+	dmabuf = dma_buf_export(&exp_info);
+	if (IS_ERR(dmabuf)) {
+		dma_free_coherent(dev, buf->size, buf->vaddr, buf->dma_addr);
+		kfree(buf);
+	}
+
+	return dmabuf;
+}
+
 /**
  * rknpu_mem_find_by_obj_addr - Validate and find mem_object by its kernel address
  * @rknpu_dev: RKNPU device
@@ -159,10 +278,25 @@ int rknpu_mem_create_ioctl(struct rknpu_device *rknpu_dev, struct file *file,
 		rknpu_obj->dmabuf = dmabuf;
 		rknpu_obj->owner = 0;
 	} else {
-		/* Start test kernel alloc/free dma buf */
+		/* Allocate DMA buffer directly */
 #ifdef RKNPU_DKMS_MISCDEV
-		ret = -EOPNOTSUPP;
-		goto err_free_obj;
+		dmabuf = rknpu_dkms_alloc(rknpu_dev->dev, args.size);
+		if (IS_ERR(dmabuf)) {
+			LOG_ERROR("DKMS direct alloc failed, size=%llu\n",
+				  args.size);
+			ret = PTR_ERR(dmabuf);
+			goto err_free_obj;
+		}
+
+		rknpu_obj->dmabuf = dmabuf;
+		rknpu_obj->owner = 1;
+
+		fd = dma_buf_fd(dmabuf, O_CLOEXEC | O_RDWR);
+		if (fd < 0) {
+			LOG_ERROR("DKMS direct alloc: fd get failed\n");
+			ret = -EFAULT;
+			goto err_free_dma_buf;
+		}
 #else
 		dmabuf = rk_dma_heap_buffer_alloc(rknpu_dev->heap, args.size,
 					  O_CLOEXEC | O_RDWR, 0x0,
@@ -256,10 +390,12 @@ err_detach_dma_buf:
 
 err_free_dma_buf:
 	if (rknpu_obj->owner) {
-#ifdef RKNPU_DKMS_MISCDEV
+#if defined(RKNPU_DKMS_MISCDEV)
 		dma_buf_put(dmabuf);
-#else
+#elif defined(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP)
 		rk_dma_heap_buffer_free(dmabuf);
+#else
+		dma_buf_put(dmabuf);
 #endif
 	} else {
 		dma_buf_put(dmabuf);

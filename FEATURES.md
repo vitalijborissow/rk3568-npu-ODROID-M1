@@ -14,7 +14,7 @@
 |---|---------|--------------|----------|----------------|-------|
 | 1 | Core DKMS driver | `-DRKNPU_DKMS` | ✅ | ✅ Working | Base driver, always enabled |
 | 2 | DRM/GEM buffers | `-DCONFIG_ROCKCHIP_RKNPU_DRM_GEM` | ✅ | ✅ Working | `/dev/dri/renderD129` present |
-| 3 | Misc device `/dev/rknpu` | `-DRKNPU_DKMS_MISCDEV_ENABLED -DRKNPU_DKMS_MISCDEV` | ✅ | ✅ Working | DMA-BUF import only mode |
+| 3 | Misc device `/dev/rknpu` | `-DRKNPU_DKMS_MISCDEV_ENABLED -DRKNPU_DKMS_MISCDEV` | ✅ | ✅ Working | Direct alloc + DMA-BUF import (full mode) |
 | 4 | Fence sync | `-DCONFIG_ROCKCHIP_RKNPU_FENCE` | ✅ | ✅ Working | DRM syncobj/sync_file support |
 | 5 | Procfs `/proc/rknpu/` | `-DCONFIG_ROCKCHIP_RKNPU_PROC_FS` | ✅ | ✅ Working | 8 entries: version, freq, load, power, volt, mm, reset, delayms |
 | 6 | Debugfs `/sys/kernel/debug/rknpu/` | `-DCONFIG_ROCKCHIP_RKNPU_DEBUG_FS` | ✅ | ✅ Working | 14 entries incl. clock_source, opp_bypass, freq_hz, voltage_mv |
@@ -59,7 +59,7 @@
 
 | # | Device | Status | Purpose |
 |---|--------|--------|---------|
-| 27 | `/dev/rknpu` | ✅ Present | Misc device — RKNN API job submission (DMA-BUF import) |
+| 27 | `/dev/rknpu` | ✅ Present | Misc device — RKNN API job submission (direct alloc + DMA-BUF import) |
 | 28 | `/dev/dri/renderD129` | ✅ Present | DRM render node — GEM buffer allocation and sharing |
 | 29 | `/dev/dma_heap/system` | ✅ Symlink → `linux,cma` | RKNN runtime buffer allocation (below 4 GB) |
 | 30 | `/dev/dma_heap/dma32` | ✅ Present | Backup DMA heap below 4 GB |
@@ -138,7 +138,7 @@
 | 66 | PD6 disabled in stock Armbian DTB | NPU won't work without overlay | `rknpu` overlay enables PD6 at boot |
 | 67 | IOMMU GFP_DMA32 patch in kernel | Not in stock Armbian; custom kernel needed for 8 GB | Use Armbian 6.18.9 build that includes this patch |
 | 68 | Thermal zone not attached | No automatic thermal throttling of NPU | Manual governor control via devfreq |
-| 69 | DRM path ~50% slower than misc device | Use `/dev/rknpu` for best performance | Both paths available |
+| 69 | DRM path ~50% slower than misc device | Use `/dev/rknpu` for best performance | Both paths available; misc device supports direct alloc since 2026-02-26 |
 | 70 | `simple_ondemand` governor idles at low freq | Poor perf if not explicitly set to `performance` | `echo performance > /sys/class/devfreq/fde40000.npu/governor` |
 | 71 | CRU freq accuracy | CRU gives approximate values (99/198/297 vs 100/200/300 MHz) | Cosmetic only |
 | 72 | SCMI 1100+ MHz crashes | SCMI gap: 1100 maps to 594 MHz, 1188 MHz crashes board | Capped at 1000 MHz |
