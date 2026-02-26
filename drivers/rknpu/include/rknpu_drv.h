@@ -116,9 +116,11 @@ struct rknpu_device {
 	struct device *fake_dev;
 	struct drm_device *drm_dev;
 #endif
-#ifdef CONFIG_ROCKCHIP_RKNPU_DMA_HEAP
+#if defined(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP)
 	struct miscdevice miscdev;
 	struct rk_dma_heap *heap;
+#elif defined(RKNPU_DKMS_MISCDEV_ENABLED)
+	struct miscdevice miscdev;
 #endif
 	atomic_t sequence;
 	spinlock_t lock;
@@ -135,6 +137,7 @@ struct rknpu_device {
 	int num_srsts;
 	struct clk_bulk_data *clks;
 	int num_clks;
+	struct clk *scmi_clk;    /* SCMI clock for DVFS (if available) */
 	struct regulator *vdd;
 	struct regulator *mem;
 	struct monitor_dev_info *mdev_info;

@@ -49,6 +49,7 @@ struct rknpu_job {
 	ktime_t hw_elapse_time;
 	atomic_t submit_count[RKNPU_MAX_CORES];
 	int iommu_domain_id;
+	bool use_drm_gem;	/* true = DRM/GEM path, false = misc device path */
 };
 
 irqreturn_t rknpu_core0_irq_handler(int irq, void *data);
@@ -59,8 +60,8 @@ irqreturn_t rknpu_core2_irq_handler(int irq, void *data);
 int rknpu_submit_ioctl(struct drm_device *dev, void *data,
 		       struct drm_file *file_priv);
 #endif
-#ifdef CONFIG_ROCKCHIP_RKNPU_DMA_HEAP
-int rknpu_submit_ioctl(struct rknpu_device *rknpu_dev, unsigned long data);
+#if defined(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP) || defined(RKNPU_DKMS_MISCDEV_ENABLED)
+int rknpu_miscdev_submit_ioctl(struct rknpu_device *rknpu_dev, unsigned long data);
 #endif
 
 int rknpu_get_hw_version(struct rknpu_device *rknpu_dev, uint32_t *version);

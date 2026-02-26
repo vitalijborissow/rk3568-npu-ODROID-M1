@@ -14,11 +14,11 @@ DKMS kernel modules to enable the 0.8 TOPS RKNN NPU on the ODROID-M1 (RK3568) ru
 ## Requirements
 
 - ODROID-M1 (Rockchip RK3568) with Armbian
-- Kernel ≥ 6.12 with headers installed
-- Packages: `dkms`, `device-tree-compiler`
+- Kernel ≥ 6.18 with headers installed
+- Packages: `dkms`, `build-essential`, `device-tree-compiler`
 
 ```bash
-apt install dkms device-tree-compiler linux-headers-$(uname -r)
+apt install dkms build-essential device-tree-compiler linux-headers-current-rockchip64
 ```
 
 ## Install
@@ -32,9 +32,8 @@ sudo ./install.sh
 Then edit `/boot/armbianEnv.txt`:
 
 ```ini
-fdtfile=rockchip/rk3568-odroid-m1-npu.dtb
+fdtfile=rockchip/rk3568-odroid-m1.no-skip-mmu-read.dtb
 user_overlays=rknpu
-extraargs=
 ```
 
 Reboot.

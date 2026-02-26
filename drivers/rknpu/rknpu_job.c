@@ -4,6 +4,11 @@
  * Author: Felix Zeng <felix.zeng@rock-chips.com>
  */
 
+/* DKMS misc device support - define early for struct compatibility */
+#if defined(RKNPU_DKMS_MISCDEV) && !defined(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP)
+#define RKNPU_DKMS_MISCDEV_ENABLED 1
+#endif
+
 #include <linux/slab.h>
 #include <linux/delay.h>
 #include <linux/sync_file.h>
@@ -92,14 +97,16 @@ static int rknpu_get_task_number(struct rknpu_job *job, int core_index)
 
 static void rknpu_job_free(struct rknpu_job *job)
 {
-#ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
-	struct rknpu_gem_object *task_obj = NULL;
-
-	task_obj =
-		(struct rknpu_gem_object *)(uintptr_t)job->args->task_obj_addr;
-	if (task_obj)
-		rknpu_gem_object_put(&task_obj->base);
+#if defined(CONFIG_ROCKCHIP_RKNPU_DRM_GEM)
+	/* Only DRM GEM path needs to put the reference */
+	if (job->use_drm_gem) {
+		struct rknpu_gem_object *task_obj =
+			(struct rknpu_gem_object *)(uintptr_t)job->args->task_obj_addr;
+		if (task_obj)
+			rknpu_gem_object_put(&task_obj->base);
+	}
 #endif
+	/* DKMS_MISCDEV uses rknpu_mem_object which is managed by session list */
 
 	if (job->fence)
 		dma_fence_put(job->fence);
@@ -130,9 +137,6 @@ static inline struct rknpu_job *rknpu_job_alloc(struct rknpu_device *rknpu_dev,
 {
 	struct rknpu_job *job = NULL;
 	int i = 0;
-#ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
-	struct rknpu_gem_object *task_obj = NULL;
-#endif
 
 	job = kzalloc(sizeof(*job), GFP_KERNEL);
 	if (!job)
@@ -148,11 +152,8 @@ static inline struct rknpu_job *rknpu_job_alloc(struct rknpu_device *rknpu_dev,
 	job->iommu_domain_id = args->iommu_domain_id;
 	for (i = 0; i < rknpu_dev->config->num_irqs; i++)
 		atomic_set(&job->submit_count[i], 0);
-#ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
-	task_obj = (struct rknpu_gem_object *)(uintptr_t)args->task_obj_addr;
-	if (task_obj)
-		rknpu_gem_object_get(&task_obj->base);
-#endif
+	/* Note: use_drm_gem is set after allocation, GEM refcount taken then */
+	job->use_drm_gem = false;
 
 	if (!(args->flags & RKNPU_JOB_NONBLOCK)) {
 		job->args = args;
@@ -274,20 +275,50 @@ static inline int rknpu_job_subcore_commit_pc(struct rknpu_job *job,
 {
 	struct rknpu_device *rknpu_dev = job->rknpu_dev;
 	struct rknpu_submit *args = job->args;
-#ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
-	struct rknpu_gem_object *task_obj =
-		(struct rknpu_gem_object *)(uintptr_t)args->task_obj_addr;
+	/*
+	 * Runtime detection of object type based on which IOCTL path was used:
+	 * - DRM path (renderD129): uses rknpu_gem_object
+	 * - Misc device path (/dev/rknpu): uses rknpu_mem_object
+	 * The struct layouts differ, so we must use the correct type.
+	 */
+	void __iomem *task_kv_addr = NULL;
+#if defined(CONFIG_ROCKCHIP_RKNPU_DRM_GEM)
+	if (job->use_drm_gem) {
+		struct rknpu_gem_object *gem_obj =
+			(struct rknpu_gem_object *)(uintptr_t)args->task_obj_addr;
+		if (gem_obj)
+			task_kv_addr = gem_obj->kv_addr;
+	}
 #endif
-#ifdef CONFIG_ROCKCHIP_RKNPU_DMA_HEAP
-	struct rknpu_mem_object *task_obj =
-		(struct rknpu_mem_object *)(uintptr_t)args->task_obj_addr;
+#if defined(RKNPU_DKMS_MISCDEV) || defined(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP)
+	if (!job->use_drm_gem) {
+		struct rknpu_mem_object *mem_obj =
+			(struct rknpu_mem_object *)(uintptr_t)args->task_obj_addr;
+		if (mem_obj)
+			task_kv_addr = mem_obj->kv_addr;
+	}
 #endif
 	struct rknpu_task *task_base = NULL;
 	struct rknpu_task *first_task = NULL;
 	struct rknpu_task *last_task = NULL;
-	void __iomem *rknpu_core_base = rknpu_dev->base[core_index];
+	void __iomem *rknpu_core_base;
 	int task_start = args->task_start;
 	int task_end;
+
+	/* Validate core_index and base pointer */
+	if (core_index < 0 || core_index >= rknpu_dev->config->num_irqs) {
+		LOG_ERROR("Invalid core_index %d (max %d)\n",
+			  core_index, rknpu_dev->config->num_irqs);
+		job->ret = -EINVAL;
+		return job->ret;
+	}
+
+	rknpu_core_base = rknpu_dev->base[core_index];
+	if (!rknpu_core_base) {
+		LOG_ERROR("NPU base[%d] is NULL!\n", core_index);
+		job->ret = -EIO;
+		return job->ret;
+	}
 	int task_number = args->task_number;
 	int task_pp_en = args->flags & RKNPU_JOB_PINGPONG ? 1 : 0;
 	int pc_data_amount_scale = rknpu_dev->config->pc_data_amount_scale;
@@ -297,7 +328,8 @@ static inline int rknpu_job_subcore_commit_pc(struct rknpu_job *job,
 	int max_submit_number = rknpu_dev->config->max_submit_number;
 	unsigned long flags;
 
-	if (!task_obj) {
+	if (!task_kv_addr) {
+		LOG_ERROR("task_kv_addr is NULL (use_drm_gem=%d)!\n", job->use_drm_gem);
 		job->ret = -EINVAL;
 		return job->ret;
 	}
@@ -336,10 +368,26 @@ static inline int rknpu_job_subcore_commit_pc(struct rknpu_job *job,
 							task_number;
 	task_end = task_start + task_number - 1;
 
-	task_base = task_obj->kv_addr;
+	task_base = task_kv_addr;
+	if (!task_base) {
+		LOG_ERROR("task_kv_addr is NULL!\n");
+		job->ret = -EINVAL;
+		return job->ret;
+	}
 
 	first_task = &task_base[task_start];
 	last_task = &task_base[task_end];
+
+	/* DEBUG: Log job submission details */
+	dev_info(rknpu_dev->dev,
+		 "RKNPU JOB: core=%d task_start=%d task_num=%d task_base=%px\n",
+		 core_index, task_start, task_number, task_base);
+	dev_info(rknpu_dev->dev,
+		 "RKNPU JOB: regcmd_addr=0x%llx int_mask=0x%x flags=0x%x\n",
+		 first_task->regcmd_addr, last_task->int_mask, args->flags);
+	dev_info(rknpu_dev->dev,
+		 "RKNPU JOB: task_base_addr=0x%llx use_drm_gem=%d\n",
+		 args->task_base_addr, job->use_drm_gem);
 
 	if (rknpu_dev->config->pc_dma_ctrl) {
 		spin_lock_irqsave(&rknpu_dev->irq_lock, flags);
@@ -744,7 +792,7 @@ static void rknpu_job_timeout_clean(struct rknpu_device *rknpu_dev,
 }
 
 static int rknpu_submit(struct rknpu_device *rknpu_dev,
-			struct rknpu_submit *args)
+			struct rknpu_submit *args, bool use_drm_gem)
 {
 	struct rknpu_job *job = NULL;
 	int ret = -EINVAL;
@@ -764,6 +812,19 @@ static int rknpu_submit(struct rknpu_device *rknpu_dev,
 		LOG_ERROR("failed to allocate rknpu job!\n");
 		return -ENOMEM;
 	}
+
+	/* Track which path is being used for correct object type handling */
+	job->use_drm_gem = use_drm_gem;
+
+#if defined(CONFIG_ROCKCHIP_RKNPU_DRM_GEM)
+	/* Take reference on GEM object for DRM path */
+	if (use_drm_gem) {
+		struct rknpu_gem_object *task_obj =
+			(struct rknpu_gem_object *)(uintptr_t)args->task_obj_addr;
+		if (task_obj)
+			rknpu_gem_object_get(&task_obj->base);
+	}
+#endif
 
 	if (args->flags & RKNPU_JOB_FENCE_IN) {
 #ifdef CONFIG_ROCKCHIP_RKNPU_FENCE
@@ -852,12 +913,13 @@ int rknpu_submit_ioctl(struct drm_device *dev, void *data,
 	struct rknpu_device *rknpu_dev = dev_get_drvdata(dev->dev);
 	struct rknpu_submit *args = data;
 
-	return rknpu_submit(rknpu_dev, args);
+	/* DRM path uses rknpu_gem_object */
+	return rknpu_submit(rknpu_dev, args, true);
 }
 #endif
 
-#ifdef CONFIG_ROCKCHIP_RKNPU_DMA_HEAP
-int rknpu_submit_ioctl(struct rknpu_device *rknpu_dev, unsigned long data)
+#if defined(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP) || defined(RKNPU_DKMS_MISCDEV_ENABLED)
+int rknpu_miscdev_submit_ioctl(struct rknpu_device *rknpu_dev, unsigned long data)
 {
 	struct rknpu_submit args;
 	int ret = -EINVAL;
@@ -869,7 +931,8 @@ int rknpu_submit_ioctl(struct rknpu_device *rknpu_dev, unsigned long data)
 		return ret;
 	}
 
-	ret = rknpu_submit(rknpu_dev, &args);
+	/* Misc device path uses rknpu_mem_object */
+	ret = rknpu_submit(rknpu_dev, &args, false);
 
 	if (unlikely(copy_to_user((struct rknpu_submit *)data, &args,
 				  sizeof(struct rknpu_submit)))) {

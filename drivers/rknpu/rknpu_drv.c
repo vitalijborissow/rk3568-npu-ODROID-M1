@@ -4,6 +4,11 @@
  * Author: Felix Zeng <felix.zeng@rock-chips.com>
  */
 
+/* DKMS misc device support - define early for rknpu_drv.h struct */
+#if defined(RKNPU_DKMS_MISCDEV) && !defined(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP)
+#define RKNPU_DKMS_MISCDEV_ENABLED 1
+#endif
+
 #include <linux/dma-buf.h>
 #include <linux/dma-mapping.h>
 #include <linux/fs.h>
@@ -44,6 +49,7 @@
 #include "rknpu_gem.h"
 #include "rknpu_devfreq.h"
 #include "rknpu_iommu.h"
+#include "rknpu_debugfs_ctrl.h"
 
 #ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
 #include <drm/drm_device.h>
@@ -57,6 +63,12 @@
 #include <linux/rk-dma-heap.h>
 #include "rknpu_mem.h"
 
+#endif
+
+/* DKMS misc device support - works without rk-dma-heap */
+#ifdef RKNPU_DKMS_MISCDEV_ENABLED
+#include <linux/miscdevice.h>
+#include "rknpu_mem.h"
 #endif
 
 /* Stub for missing Rockchip nvmem function */
@@ -535,7 +547,7 @@ static int rknpu_action(struct rknpu_device *rknpu_dev,
 	return ret;
 }
 
-#ifdef CONFIG_ROCKCHIP_RKNPU_DMA_HEAP
+#if defined(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP) || defined(RKNPU_DKMS_MISCDEV_ENABLED)
 static int rknpu_open(struct inode *inode, struct file *file)
 {
 	struct rknpu_device *rknpu_dev =
@@ -599,7 +611,7 @@ static int rknpu_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static int rknpu_action_ioctl(struct rknpu_device *rknpu_dev,
+static int rknpu_miscdev_action_ioctl(struct rknpu_device *rknpu_dev,
 			      unsigned long data)
 {
 	struct rknpu_action args;
@@ -638,10 +650,10 @@ static long rknpu_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 	switch (_IOC_NR(cmd)) {
 	case RKNPU_ACTION:
-		ret = rknpu_action_ioctl(rknpu_dev, arg);
+		ret = rknpu_miscdev_action_ioctl(rknpu_dev, arg);
 		break;
 	case RKNPU_SUBMIT:
-		ret = rknpu_submit_ioctl(rknpu_dev, arg);
+		ret = rknpu_miscdev_submit_ioctl(rknpu_dev, arg);
 		break;
 	case RKNPU_MEM_CREATE:
 		ret = rknpu_mem_create_ioctl(rknpu_dev, file, cmd, arg);
@@ -652,7 +664,7 @@ static long rknpu_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		ret = rknpu_mem_destroy_ioctl(rknpu_dev, file, arg);
 		break;
 	case RKNPU_MEM_SYNC:
-		ret = rknpu_mem_sync_ioctl(rknpu_dev, arg);
+		ret = rknpu_mem_sync_ioctl(rknpu_dev, file, arg);
 		break;
 	default:
 		break;
@@ -839,21 +851,18 @@ static bool rknpu_is_iommu_enable(struct device *dev)
 
 	iommu = of_parse_phandle(dev->of_node, "iommus", 0);
 	if (!iommu) {
-		LOG_DEV_INFO(
-			dev,
-			"rknpu iommu device-tree entry not found!, using non-iommu mode\n");
+		dev_dbg(dev,
+			"rknpu iommu device-tree entry not found, using non-iommu mode\n");
 		return false;
 	}
 
 	if (!of_device_is_available(iommu)) {
-		LOG_DEV_INFO(dev,
-			     "rknpu iommu is disabled, using non-iommu mode\n");
+		dev_dbg(dev,
+			"rknpu iommu is disabled, using non-iommu mode\n");
 		of_node_put(iommu);
 		return false;
 	}
 	of_node_put(iommu);
-
-	LOG_DEV_INFO(dev, "rknpu iommu is enabled, using iommu mode\n");
 
 	return true;
 }
@@ -949,27 +958,29 @@ static int rknpu_power_on(struct rknpu_device *rknpu_dev)
 	int ret = -EINVAL;
 
 #ifndef FPGA_PLATFORM
-	if (rknpu_dev->vdd) {
-		ret = regulator_enable(rknpu_dev->vdd);
-		if (ret) {
-			LOG_DEV_ERROR(
-				dev,
-				"failed to enable vdd reg for rknpu, ret: %d\n",
-				ret);
-			return ret;
-		}
-	}
+	/* VDD regulator handling disabled - PMIC manages vdd_npu */
+//DISABLED: 	if (rknpu_dev->vdd) {
+//DISABLED: 		ret = regulator_enable(rknpu_dev->vdd);
+//DISABLED: 		if (ret) {
+//DISABLED: 			LOG_DEV_ERROR(
+//DISABLED: 				dev,
+//DISABLED: 				"failed to enable vdd reg for rknpu, ret: %d\n",
+//DISABLED: 				ret);
+//DISABLED: 			return ret;
+//DISABLED: 		}
+//DISABLED: 	}
 
-	if (rknpu_dev->mem) {
-		ret = regulator_enable(rknpu_dev->mem);
-		if (ret) {
-			LOG_DEV_ERROR(
-				dev,
-				"failed to enable mem reg for rknpu, ret: %d\n",
-				ret);
-			return ret;
-		}
-	}
+	/* MEM regulator handling disabled - PMIC manages it */
+//DISABLED: 	if (rknpu_dev->mem) {
+//DISABLED: 		ret = regulator_enable(rknpu_dev->mem);
+//DISABLED: 		if (ret) {
+//DISABLED: 			LOG_DEV_ERROR(
+//DISABLED: 				dev,
+//DISABLED: 				"failed to enable mem reg for rknpu, ret: %d\n",
+//DISABLED: 				ret);
+//DISABLED: 			return ret;
+//DISABLED: 		}
+//DISABLED: 	}
 #endif
 
 	ret = clk_bulk_prepare_enable(rknpu_dev->num_clks, rknpu_dev->clks);
@@ -977,6 +988,18 @@ static int rknpu_power_on(struct rknpu_device *rknpu_dev)
 		LOG_DEV_ERROR(dev, "failed to enable clk for rknpu, ret: %d\n",
 			      ret);
 		return ret;
+	}
+
+	/* DEBUG: Log clock enable success and rates */
+	{
+		int i;
+		dev_info(dev, "RKNPU POWER_ON: clocks enabled (%d clks)\n", rknpu_dev->num_clks);
+		for (i = 0; i < rknpu_dev->num_clks && i < 4; i++) {
+			if (rknpu_dev->clks[i].clk) {
+				dev_info(dev, "RKNPU POWER_ON: clk[%d] rate=%lu Hz\n",
+					 i, clk_get_rate(rknpu_dev->clks[i].clk));
+			}
+		}
 	}
 
 #ifndef FPGA_PLATFORM
@@ -1037,7 +1060,7 @@ static int rknpu_power_on(struct rknpu_device *rknpu_dev)
 			      ret);
 	}
 
-	if (rknpu_dev->config->state_init != NULL)
+	if (rknpu_dev->config && rknpu_dev->config->state_init != NULL)
 		rknpu_dev->config->state_init(rknpu_dev);
 
 out:
@@ -1100,11 +1123,17 @@ static int rknpu_power_off(struct rknpu_device *rknpu_dev)
 	clk_bulk_disable_unprepare(rknpu_dev->num_clks, rknpu_dev->clks);
 
 #ifndef FPGA_PLATFORM
-	if (rknpu_dev->vdd)
-		regulator_disable(rknpu_dev->vdd);
-
-	if (rknpu_dev->mem)
-		regulator_disable(rknpu_dev->mem);
+	/* PMIC manages regulators - power_off regulator calls removed */
+//DISABLED: 	LOG_INFO("DEBUG power_off: vdd=%px mem=%px\n", rknpu_dev->vdd, rknpu_dev->mem);
+//DISABLED: 	if (rknpu_dev->vdd && !IS_ERR(rknpu_dev->vdd)) {
+//DISABLED: 		LOG_INFO("DEBUG: calling regulator_disable(vdd=%px)\n", rknpu_dev->vdd);
+//DISABLED: 		regulator_disable(rknpu_dev->vdd);
+//DISABLED: 	}
+//DISABLED: 
+//DISABLED: 	if (rknpu_dev->mem && !IS_ERR(rknpu_dev->mem)) {
+//DISABLED: 		LOG_INFO("DEBUG: calling regulator_disable(mem=%px)\n", rknpu_dev->mem);
+//DISABLED: 		regulator_disable(rknpu_dev->mem);
+//DISABLED: 	}
 #endif
 
 	return 0;
@@ -1413,16 +1442,27 @@ static int rknpu_probe(struct platform_device *pdev)
 			return -ENXIO;
 		}
 
-		rknpu_dev->base[i] = devm_ioremap_resource(dev, res);
-		if (PTR_ERR(rknpu_dev->base[i]) == -EBUSY) {
+		/*
+		 * RK3568 NPU region (0xfde40000-0xfde4ffff) overlaps with the
+		 * NPU IOMMU at 0xfde4b000. Skip devm_ioremap_resource() to
+		 * avoid kernel "can't request region" error and go straight
+		 * to devm_ioremap() which doesn't require exclusive access.
+		 */
+		if (res->start == 0xfde40000) {
 			rknpu_dev->base[i] = devm_ioremap(dev, res->start,
 							  resource_size(res));
+		} else {
+			rknpu_dev->base[i] = devm_ioremap_resource(dev, res);
+			if (PTR_ERR(rknpu_dev->base[i]) == -EBUSY) {
+				rknpu_dev->base[i] = devm_ioremap(dev, res->start,
+								  resource_size(res));
+			}
 		}
 
-		if (IS_ERR(rknpu_dev->base[i])) {
+		if (IS_ERR_OR_NULL(rknpu_dev->base[i])) {
 			LOG_DEV_ERROR(dev,
 				      "failed to remap register for rknpu\n");
-			return PTR_ERR(rknpu_dev->base[i]);
+			return -ENOMEM;
 		}
 	}
 
@@ -1430,11 +1470,11 @@ static int rknpu_probe(struct platform_device *pdev)
 		rknpu_dev->bw_priority_base =
 			devm_ioremap(dev, config->bw_priority_addr,
 				     config->bw_priority_length);
-		if (IS_ERR(rknpu_dev->bw_priority_base)) {
-			LOG_DEV_ERROR(
+		/* devm_ioremap returns NULL on failure, not ERR_PTR */
+		if (!rknpu_dev->bw_priority_base) {
+			LOG_DEV_WARN(
 				rknpu_dev->dev,
 				"failed to remap bw priority register for rknpu\n");
-			rknpu_dev->bw_priority_base = NULL;
 		}
 	}
 
@@ -1474,6 +1514,20 @@ static int rknpu_probe(struct platform_device *pdev)
 	LOG_DEV_INFO(dev, "Initialized %s: v%d.%d.%d for %s\n", DRIVER_DESC,
 		     DRIVER_MAJOR, DRIVER_MINOR, DRIVER_PATCHLEVEL,
 		     DRIVER_DATE);
+#elif defined(RKNPU_DKMS_MISCDEV_ENABLED)
+	/* DKMS misc device - works without rk-dma-heap */
+	rknpu_dev->miscdev.minor = MISC_DYNAMIC_MINOR;
+	rknpu_dev->miscdev.name = "rknpu";
+	rknpu_dev->miscdev.fops = &rknpu_fops;
+
+	ret = misc_register(&rknpu_dev->miscdev);
+	if (ret) {
+		LOG_DEV_ERROR(dev, "cannot register miscdev (%d)\n", ret);
+		/* Non-fatal - DRM path still works */
+		dev_warn(dev, "DKMS: /dev/rknpu not available, use DRM API\n");
+	} else {
+		LOG_DEV_INFO(dev, "DKMS: /dev/rknpu registered (DMA-BUF import only)\n");
+	}
 #endif
 
 #ifdef CONFIG_ROCKCHIP_RKNPU_FENCE
@@ -1509,12 +1563,16 @@ static int rknpu_probe(struct platform_device *pdev)
 	if (ret)
 		goto err_remove_drv;
 
+	/* Force a hardware reset on init to clear any stuck state */
+	ret = rknpu_soft_reset(rknpu_dev);
+	if (ret)
+		LOG_DEV_WARN(dev, "RKNPU: hardware reset failed: %d (continuing)\n", ret);
 #ifndef FPGA_PLATFORM
 	rknpu_devfreq_init(rknpu_dev);
 #endif
 
 	// set default power put delay to 3s
-	rknpu_dev->power_put_delay = 3000;
+	rknpu_dev->power_put_delay = 0;
 	rknpu_dev->power_off_wq =
 		create_freezable_workqueue("rknpu_power_off_wq");
 	if (!rknpu_dev->power_off_wq) {
@@ -1525,6 +1583,19 @@ static int rknpu_probe(struct platform_device *pdev)
 	INIT_DEFERRABLE_WORK(&rknpu_dev->power_off_work,
 			     rknpu_power_off_delay_work);
 
+	/* DKMS: Use RKNPU_DKMS_SRAM_ENABLED to bypass CONFIG_NO_GKI check */
+#if defined(RKNPU_DKMS_SRAM_ENABLED)
+	if (IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_SRAM) && rknpu_dev->iommu_en) {
+		if (!rknpu_find_sram_resource(rknpu_dev)) {
+			ret = rknpu_mm_create(rknpu_dev->sram_size, PAGE_SIZE,
+					      &rknpu_dev->sram_mm);
+			if (ret != 0)
+				goto err_remove_wq;
+		} else {
+			LOG_DEV_WARN(dev, "could not find sram resource!\n");
+		}
+	}
+#else
 	if (IS_ENABLED(CONFIG_NO_GKI) &&
 	    IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_SRAM) && rknpu_dev->iommu_en) {
 		if (!rknpu_find_sram_resource(rknpu_dev)) {
@@ -1536,6 +1607,7 @@ static int rknpu_probe(struct platform_device *pdev)
 			LOG_DEV_WARN(dev, "could not find sram resource!\n");
 		}
 	}
+#endif
 
 	if (IS_ENABLED(CONFIG_NO_GKI) && rknpu_dev->iommu_en &&
 	    rknpu_dev->config->nbuf_size > 0) {
@@ -1553,6 +1625,7 @@ static int rknpu_probe(struct platform_device *pdev)
 	atomic_set(&rknpu_dev->iommu_domain_refcount, 0);
 
 	rknpu_debugger_init(rknpu_dev);
+	rknpu_debugfs_ctrl_init(rknpu_dev);
 	rknpu_init_timer(rknpu_dev);
 
 	return 0;
@@ -1569,7 +1642,7 @@ err_remove_drv:
 #ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
 	rknpu_drm_remove(rknpu_dev);
 #endif
-#ifdef CONFIG_ROCKCHIP_RKNPU_DMA_HEAP
+#if defined(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP) || defined(RKNPU_DKMS_MISCDEV_ENABLED)
 	misc_deregister(&(rknpu_dev->miscdev));
 #endif
 
@@ -1613,7 +1686,7 @@ static void rknpu_remove(struct platform_device *pdev)
 #ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
 	rknpu_drm_remove(rknpu_dev);
 #endif
-#ifdef CONFIG_ROCKCHIP_RKNPU_DMA_HEAP
+#if defined(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP) || defined(RKNPU_DKMS_MISCDEV_ENABLED)
 	misc_deregister(&(rknpu_dev->miscdev));
 #endif
 

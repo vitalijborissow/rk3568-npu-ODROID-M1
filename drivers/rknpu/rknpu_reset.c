@@ -107,8 +107,12 @@ int rknpu_soft_reset(struct rknpu_device *rknpu_dev)
 		return 0;
 	}
 
-	if (!mutex_trylock(&rknpu_dev->reset_lock))
+	/* Skip mutex during init - just proceed with reset */
+	
+	if (!rknpu_dev->config) {
+		LOG_DEV_ERROR(rknpu_dev->dev, "RKNPU: config is NULL, skipping soft_reset\n");
 		return 0;
+	}
 
 	rknpu_dev->soft_reseting = true;
 
@@ -118,8 +122,6 @@ int rknpu_soft_reset(struct rknpu_device *rknpu_dev)
 		subcore_data = &rknpu_dev->subcore_datas[i];
 		wake_up(&subcore_data->job_done_wq);
 	}
-
-	LOG_INFO("soft reset, num: %d\n", rknpu_dev->num_srsts);
 
 	for (i = 0; i < rknpu_dev->num_srsts; ++i)
 		ret |= rknpu_reset_assert(rknpu_dev->srsts[i]);
@@ -134,7 +136,7 @@ int rknpu_soft_reset(struct rknpu_device *rknpu_dev)
 	if (ret) {
 		LOG_DEV_ERROR(rknpu_dev->dev,
 			      "failed to soft reset for rknpu: %d\n", ret);
-		mutex_unlock(&rknpu_dev->reset_lock);
+		/* Skip mutex unlock - not using mutex */
 		return ret;
 	}
 
@@ -151,7 +153,7 @@ int rknpu_soft_reset(struct rknpu_device *rknpu_dev)
 	if (rknpu_dev->config->state_init != NULL)
 		rknpu_dev->config->state_init(rknpu_dev);
 
-	mutex_unlock(&rknpu_dev->reset_lock);
+	/* Skip mutex unlock - not using mutex */
 #endif
 
 	return 0;

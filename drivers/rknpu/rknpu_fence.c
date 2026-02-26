@@ -4,6 +4,11 @@
  * Author: Felix Zeng <felix.zeng@rock-chips.com>
  */
 
+/* DKMS misc device support - define early for struct compatibility */
+#if defined(RKNPU_DKMS_MISCDEV) && !defined(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP)
+#define RKNPU_DKMS_MISCDEV_ENABLED 1
+#endif
+
 #include <linux/slab.h>
 #include <linux/file.h>
 #include <linux/dma-fence.h>
