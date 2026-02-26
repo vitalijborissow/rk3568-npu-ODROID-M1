@@ -178,9 +178,9 @@ struct drm_gem_object *rknpu_gem_prime_import(struct drm_device *dev,
 #endif
 struct sg_table *rknpu_gem_prime_get_sg_table(struct drm_gem_object *obj);
 struct drm_gem_object *
-rknpu_gem_prime_import_sg_table(struct drm_device *drm,
-					struct dma_buf_attachment *attach,
-					struct sg_table *sgt);
+rknpu_gem_prime_import_sg_table(struct drm_device *dev,
+				struct dma_buf_attachment *attach,
+				struct sg_table *sgt);
 #if KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE
 void *rknpu_gem_prime_vmap(struct drm_gem_object *obj);
 void rknpu_gem_prime_vunmap(struct drm_gem_object *obj, void *vaddr);
@@ -193,12 +193,6 @@ int rknpu_gem_prime_mmap(struct drm_gem_object *obj,
 
 int rknpu_gem_sync_ioctl(struct drm_device *dev, void *data,
 			 struct drm_file *file_priv);
-
-#ifdef RKNPU_DKMS
-dma_addr_t rknpu_dkms_find_gem_base_by_addr(dma_addr_t addr);
-struct rknpu_gem_object *
-rknpu_dkms_find_gem_obj_by_addr(dma_addr_t addr, dma_addr_t *base_out);
-#endif
 
 static inline void *rknpu_gem_alloc_page(size_t nr_pages)
 {

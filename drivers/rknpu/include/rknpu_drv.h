@@ -18,25 +18,9 @@
 #include <linux/hrtimer.h>
 #include <linux/miscdevice.h>
 
-#ifndef RKNPU_DKMS
 #include <soc/rockchip/rockchip_opp_select.h>
 #include <soc/rockchip/rockchip_system_monitor.h>
 #include <soc/rockchip/rockchip_ipa.h>
-#else
-struct monitor_dev_info;
-struct ipa_power_model_data;
-struct thermal_cooling_device;
-struct devfreq;
-struct rockchip_opp_info {
-	int dummy;
-};
-#endif
-
-#ifdef RKNPU_DKMS
-#ifdef CONFIG_ROCKCHIP_RKNPU_DMA_HEAP
-#undef CONFIG_ROCKCHIP_RKNPU_DMA_HEAP
-#endif
-#endif
 
 #include "rknpu_job.h"
 #include "rknpu_fence.h"
@@ -132,11 +116,9 @@ struct rknpu_device {
 	struct device *fake_dev;
 	struct drm_device *drm_dev;
 #endif
-#if defined(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP) || defined(RKNPU_DKMS_MISCDEV)
-	struct miscdevice miscdev;
 #ifdef CONFIG_ROCKCHIP_RKNPU_DMA_HEAP
+	struct miscdevice miscdev;
 	struct rk_dma_heap *heap;
-#endif
 #endif
 	atomic_t sequence;
 	spinlock_t lock;
@@ -188,8 +170,6 @@ struct rknpu_device {
 	struct rknpu_mm *sram_mm;
 	unsigned long power_put_delay;
 	struct iommu_group *iommu_group;
-	struct device *iommu_pm_dev;
-	bool iommu_pm_held;
 	int iommu_domain_num;
 	int iommu_domain_id;
 	struct iommu_domain *iommu_domains[RKNPU_MAX_IOMMU_DOMAIN_NUM];

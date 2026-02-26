@@ -33,7 +33,7 @@
 #include <linux/regmap.h>
 #include <linux/of_address.h>
 
-#if !defined(FPGA_PLATFORM)
+#ifndef FPGA_PLATFORM
 #include <soc/rockchip/rockchip_iommu.h>
 #endif
 
@@ -41,6 +41,7 @@
 #include "rknpu_reset.h"
 #include "rknpu_fence.h"
 #include "rknpu_drv.h"
+#include "rknpu_gem.h"
 #include "rknpu_devfreq.h"
 #include "rknpu_iommu.h"
 
@@ -55,9 +56,15 @@
 #ifdef CONFIG_ROCKCHIP_RKNPU_DMA_HEAP
 #include <linux/rk-dma-heap.h>
 #include "rknpu_mem.h"
-#elif defined(RKNPU_DKMS_MISCDEV)
-#include "rknpu_mem.h"
+
 #endif
+
+/* Stub for missing Rockchip nvmem function */
+static inline int rockchip_nvmem_cell_read_u8(struct device_node *np, const char *cell_id, u8 *val)
+{
+    *val = 0;
+    return 0;
+}
 
 #define POWER_DOWN_FREQ 200000000
 #define NPU_MMU_DISABLED_POLL_PERIOD_US 1000
@@ -67,8 +74,6 @@ static int bypass_irq_handler;
 module_param(bypass_irq_handler, int, 0644);
 MODULE_PARM_DESC(bypass_irq_handler,
 		 "bypass RKNPU irq handler if set it to 1, disabled by default");
-
-static struct rknpu_device *rknpu_global_dev;
 
 static int bypass_soft_reset;
 module_param(bypass_soft_reset, int, 0644);
@@ -89,13 +94,6 @@ static const struct rknpu_irqs_data rk3588_npu_irqs[] = {
 	{ "npu1_irq", rknpu_core1_irq_handler },
 	{ "npu2_irq", rknpu_core2_irq_handler }
 };
-
-#ifdef RKNPU_DKMS
-static bool dkms_rk356x_state_init;
-module_param(dkms_rk356x_state_init, bool, 0644);
-MODULE_PARM_DESC(dkms_rk356x_state_init,
-		 "DKMS: enable experimental rk356x state init sequence");
-#endif
 
 static const struct rknpu_amount_data rknpu_old_top_amount = {
 	.offset_clr_all = 0x8010,
@@ -121,23 +119,6 @@ static const struct rknpu_amount_data rknpu_core_amount = {
 static void rk3576_state_init(struct rknpu_device *rknpu_dev)
 {
 	void __iomem *rknpu_core_base = rknpu_dev->base[0];
-
-	writel(0x1, rknpu_core_base + 0x10);
-	writel(0, rknpu_core_base + 0x1004);
-	writel(0x80000000, rknpu_core_base + 0x1024);
-	writel(1, rknpu_core_base + 0x1004);
-	writel(0x80000000, rknpu_core_base + 0x1024);
-	writel(0x1e, rknpu_core_base + 0x1004);
-}
-
-static void rk356x_state_init(struct rknpu_device *rknpu_dev)
-{
-	void __iomem *rknpu_core_base = rknpu_dev->base[0];
-
-#ifdef RKNPU_DKMS
-	if (!dkms_rk356x_state_init)
-		return;
-#endif
 
 	writel(0x1, rknpu_core_base + 0x10);
 	writel(0, rknpu_core_base + 0x1004);
@@ -203,7 +184,7 @@ static const struct rknpu_config rk356x_rknpu_config = {
 	.core_mask = 0x1,
 	.amount_top = &rknpu_old_top_amount,
 	.amount_core = NULL,
-	.state_init = rk356x_state_init,
+	.state_init = NULL,
 	.cache_sgt_init = NULL,
 };
 
@@ -367,6 +348,7 @@ static const struct of_device_id rknpu_of_match[] = {
 };
 
 MODULE_DEVICE_TABLE(of, rknpu_of_match);
+
 static int rknpu_get_drv_version(uint32_t *version)
 {
 	*version = RKNPU_GET_DRV_VERSION_CODE(DRIVER_MAJOR, DRIVER_MINOR,
@@ -442,7 +424,7 @@ int rknpu_power_put_delay(struct rknpu_device *rknpu_dev)
 	return 0;
 }
 
-static int __maybe_unused rknpu_action(struct rknpu_device *rknpu_dev,
+static int rknpu_action(struct rknpu_device *rknpu_dev,
 			struct rknpu_action *args)
 {
 	int ret = -EINVAL;
@@ -553,7 +535,7 @@ static int __maybe_unused rknpu_action(struct rknpu_device *rknpu_dev,
 	return ret;
 }
 
-#if defined(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP) || defined(RKNPU_DKMS_MISCDEV)
+#ifdef CONFIG_ROCKCHIP_RKNPU_DMA_HEAP
 static int rknpu_open(struct inode *inode, struct file *file)
 {
 	struct rknpu_device *rknpu_dev =
@@ -617,7 +599,7 @@ static int rknpu_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static int rknpu_misc_action_ioctl(struct rknpu_device *rknpu_dev,
+static int rknpu_action_ioctl(struct rknpu_device *rknpu_dev,
 			      unsigned long data)
 {
 	struct rknpu_action args;
@@ -656,14 +638,10 @@ static long rknpu_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 	switch (_IOC_NR(cmd)) {
 	case RKNPU_ACTION:
-		ret = rknpu_misc_action_ioctl(rknpu_dev, arg);
+		ret = rknpu_action_ioctl(rknpu_dev, arg);
 		break;
 	case RKNPU_SUBMIT:
-	#ifdef RKNPU_DKMS_MISCDEV
-		ret = rknpu_submit_misc_ioctl(rknpu_dev, file, arg);
-	#else
 		ret = rknpu_submit_ioctl(rknpu_dev, arg);
-	#endif
 		break;
 	case RKNPU_MEM_CREATE:
 		ret = rknpu_mem_create_ioctl(rknpu_dev, file, cmd, arg);
@@ -674,7 +652,7 @@ static long rknpu_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		ret = rknpu_mem_destroy_ioctl(rknpu_dev, file, arg);
 		break;
 	case RKNPU_MEM_SYNC:
-		ret = rknpu_mem_sync_ioctl(rknpu_dev, file, arg);
+		ret = rknpu_mem_sync_ioctl(rknpu_dev, arg);
 		break;
 	default:
 		break;
@@ -802,7 +780,6 @@ static struct drm_driver rknpu_drm_driver = {
 	.fops = &rknpu_drm_driver_fops,
 	.name = DRIVER_NAME,
 	.desc = DRIVER_DESC,
-	.date = DRIVER_DATE,
 	.major = DRIVER_MAJOR,
 	.minor = DRIVER_MINOR,
 	.patchlevel = DRIVER_PATCHLEVEL,
@@ -847,8 +824,7 @@ static enum hrtimer_restart hrtimer_handler(struct hrtimer *timer)
 static void rknpu_init_timer(struct rknpu_device *rknpu_dev)
 {
 	rknpu_dev->kt = ktime_set(0, RKNPU_LOAD_INTERVAL);
-	hrtimer_init(&rknpu_dev->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	rknpu_dev->timer.function = hrtimer_handler;
+	hrtimer_setup(&rknpu_dev->timer, hrtimer_handler, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	hrtimer_start(&rknpu_dev->timer, rknpu_dev->kt, HRTIMER_MODE_REL);
 }
 
@@ -955,9 +931,6 @@ static void rknpu_drm_remove(struct rknpu_device *rknpu_dev)
 {
 	struct drm_device *drm_dev = rknpu_dev->drm_dev;
 
-	if (!drm_dev)
-		return;
-
 	drm_fake_dev_unregister(rknpu_dev);
 
 	drm_dev_unregister(drm_dev);
@@ -967,8 +940,6 @@ static void rknpu_drm_remove(struct rknpu_device *rknpu_dev)
 #else
 	drm_dev_unref(drm_dev);
 #endif
-
-	rknpu_dev->drm_dev = NULL;
 }
 #endif
 
@@ -976,12 +947,6 @@ static int rknpu_power_on(struct rknpu_device *rknpu_dev)
 {
 	struct device *dev = rknpu_dev->dev;
 	int ret = -EINVAL;
-
-#ifdef RKNPU_DKMS
-	LOG_DEV_INFO(dev, "DKMS: rknpu_power_on enter\n");
-	pr_info(LOG_TAG ": DKMS: rknpu_power_on enter\n");
-	dev_err(dev, "DKMS: rknpu_power_on enter\n");
-#endif
 
 #ifndef FPGA_PLATFORM
 	if (rknpu_dev->vdd) {
@@ -1014,21 +979,11 @@ static int rknpu_power_on(struct rknpu_device *rknpu_dev)
 		return ret;
 	}
 
-#ifdef RKNPU_DKMS
-	dev_err(dev, "DKMS: clocks enabled\n");
-#endif
-
-#ifdef RKNPU_DKMS
-	LOG_DEV_INFO(dev, "DKMS: clocks enabled (num_clks=%d)\n",
-		     rknpu_dev->num_clks);
-#endif
-
 #ifndef FPGA_PLATFORM
 	rknpu_devfreq_lock(rknpu_dev);
 #endif
 
 	if (rknpu_dev->multiple_domains) {
-#ifndef RKNPU_DKMS
 		if (rknpu_dev->genpd_dev_npu0) {
 #if KERNEL_VERSION(5, 5, 0) < LINUX_VERSION_CODE
 			ret = pm_runtime_resume_and_get(
@@ -1074,51 +1029,16 @@ static int rknpu_power_on(struct rknpu_device *rknpu_dev)
 				goto out;
 			}
 		}
-#endif
 	}
-
-	if (rknpu_dev->iommu_en && rknpu_dev->iommu_pm_dev &&
-	    !rknpu_dev->iommu_pm_held) {
-		int pret;
-
-		pret = pm_runtime_get_sync(rknpu_dev->iommu_pm_dev);
-		if (pret < 0) {
-			pm_runtime_put_noidle(rknpu_dev->iommu_pm_dev);
-			LOG_DEV_ERROR(
-				dev,
-				"failed to get pm runtime for iommu, ret: %d\n",
-				pret);
-		} else {
-			rknpu_dev->iommu_pm_held = true;
-			dev_err(dev,
-				"DKMS: iommu_pm hold pret=%d runtime_status=%d usage_count=%d\n",
-				pret,
-				(int)rknpu_dev->iommu_pm_dev->power.runtime_status,
-				atomic_read(&rknpu_dev->iommu_pm_dev->power.usage_count));
-		}
-	}
-
 	ret = pm_runtime_get_sync(dev);
 	if (ret < 0) {
 		LOG_DEV_ERROR(dev,
 			      "failed to get pm runtime for rknpu, ret: %d\n",
 			      ret);
-	} else {
-		ret = 0;
 	}
-
-#ifdef RKNPU_DKMS
-	LOG_DEV_INFO(dev, "DKMS: pm_runtime_get_sync(dev) ret=%d\n", ret);
-	pr_info(LOG_TAG ": DKMS: pm_runtime_get_sync(dev) ret=%d\n", ret);
-#endif
 
 	if (rknpu_dev->config->state_init != NULL)
 		rknpu_dev->config->state_init(rknpu_dev);
-
-#ifdef RKNPU_DKMS
-	LOG_DEV_INFO(dev, "DKMS: rknpu_power_on exit ret=%d\n", ret);
-	pr_info(LOG_TAG ": DKMS: rknpu_power_on exit ret=%d\n", ret);
-#endif
 
 out:
 #ifndef FPGA_PLATFORM
@@ -1130,44 +1050,19 @@ out:
 
 static int rknpu_power_off(struct rknpu_device *rknpu_dev)
 {
-	struct device *dev __maybe_unused = rknpu_dev->dev;
+	struct device *dev = rknpu_dev->dev;
 
 #ifndef FPGA_PLATFORM
+	int ret;
+	bool val;
+
 	rknpu_devfreq_lock(rknpu_dev);
 #endif
 
 	pm_runtime_put_sync(dev);
 
-	if (rknpu_dev->iommu_pm_held && rknpu_dev->iommu_pm_dev) {
-		pm_runtime_put_sync(rknpu_dev->iommu_pm_dev);
-		rknpu_dev->iommu_pm_held = false;
-		dev_err(dev,
-			"DKMS: iommu_pm release runtime_status=%d usage_count=%d\n",
-			(int)rknpu_dev->iommu_pm_dev->power.runtime_status,
-			atomic_read(&rknpu_dev->iommu_pm_dev->power.usage_count));
-	}
-
-#if !defined(FPGA_PLATFORM) && !defined(MODULE) && !defined(RKNPU_DKMS)
-	if (rknpu_dev->iommu_en) {
-		int ret;
-		bool val;
-
-		ret = readx_poll_timeout(rockchip_iommu_is_enabled, dev, val, !val,
-					 NPU_MMU_DISABLED_POLL_PERIOD_US,
-					 NPU_MMU_DISABLED_POLL_TIMEOUT_US);
-		if (ret) {
-			LOG_DEV_ERROR(dev, "iommu still enabled\n");
-			pm_runtime_get_sync(dev);
-			rknpu_devfreq_unlock(rknpu_dev);
-			return ret;
-		}
-	}
-#endif
-
-#ifndef RKNPU_DKMS
 	if (rknpu_dev->multiple_domains) {
 #ifndef FPGA_PLATFORM
-		#if !defined(MODULE)
 		/*
 		 * Because IOMMU's runtime suspend callback is asynchronous,
 		 * So it may be executed after the NPU is turned off after PD/CLK/VD,
@@ -1177,24 +1072,15 @@ static int rknpu_power_off(struct rknpu_device *rknpu_dev)
 		 * If pm runtime framework can handle this issue in the future, remove
 		 * this.
 		 */
-		{
-			int ret;
-			bool val;
-
-			ret = readx_poll_timeout(rockchip_iommu_is_enabled, dev, val, !val,
-						 NPU_MMU_DISABLED_POLL_PERIOD_US,
-						 NPU_MMU_DISABLED_POLL_TIMEOUT_US);
-			if (ret) {
-				LOG_DEV_ERROR(dev, "iommu still enabled\n");
-				pm_runtime_get_sync(dev);
-				rknpu_devfreq_unlock(rknpu_dev);
-				return ret;
-			}
+		ret = readx_poll_timeout(rockchip_iommu_is_enabled, dev, val,
+					 !val, NPU_MMU_DISABLED_POLL_PERIOD_US,
+					 NPU_MMU_DISABLED_POLL_TIMEOUT_US);
+		if (ret) {
+			LOG_DEV_ERROR(dev, "iommu still enabled\n");
+			pm_runtime_get_sync(dev);
+			rknpu_devfreq_unlock(rknpu_dev);
+			return ret;
 		}
-		#else
-		if (rknpu_dev->iommu_en)
-			msleep(20);
-		#endif
 #else
 		if (rknpu_dev->iommu_en)
 			msleep(20);
@@ -1206,7 +1092,6 @@ static int rknpu_power_off(struct rknpu_device *rknpu_dev)
 		if (rknpu_dev->genpd_dev_npu0)
 			pm_runtime_put_sync(rknpu_dev->genpd_dev_npu0);
 	}
-#endif
 
 #ifndef FPGA_PLATFORM
 	rknpu_devfreq_unlock(rknpu_dev);
@@ -1377,15 +1262,13 @@ static int rknpu_find_nbuf_resource(struct rknpu_device *rknpu_dev)
 
 static int rknpu_get_invalid_core_mask(struct device *dev)
 {
+	int ret = 0;
 	u8 invalid_core_mask = 0;
 
 	if (of_property_match_string(dev->of_node, "nvmem-cell-names",
 				     "cores") >= 0) {
-#ifndef RKNPU_DKMS
-		int ret = 0;
-
 		ret = rockchip_nvmem_cell_read_u8(dev->of_node, "cores",
-					  &invalid_core_mask);
+						  &invalid_core_mask);
 		/* The default valid npu cores for RK3583 are core0 and core1 */
 		invalid_core_mask |= RKNPU_CORE2_MASK;
 		if (ret) {
@@ -1394,9 +1277,6 @@ static int rknpu_get_invalid_core_mask(struct device *dev)
 				"failed to get specification_serial_number\n");
 			return invalid_core_mask;
 		}
-#else
-		invalid_core_mask = 0;
-#endif
 	}
 
 	return (int)invalid_core_mask;
@@ -1407,19 +1287,10 @@ static int rknpu_probe(struct platform_device *pdev)
 	struct resource *res = NULL;
 	struct rknpu_device *rknpu_dev = NULL;
 	struct device *dev = &pdev->dev;
-#ifndef RKNPU_DKMS
 	struct device *virt_dev = NULL;
-#endif
 	const struct of_device_id *match = NULL;
 	const struct rknpu_config *config = NULL;
 	int ret = -EINVAL, i = 0;
-
-#ifdef RKNPU_DKMS
-	LOG_DEV_INFO(dev, "DKMS: rknpu_probe enter\n");
-	pr_info(LOG_TAG ": DKMS: rknpu_probe enter\n");
-	pr_err(LOG_TAG ": DKMS: rknpu_probe enter\n");
-	dev_err(dev, "DKMS: rknpu_probe enter\n");
-#endif
 
 	if (!pdev->dev.of_node) {
 		LOG_DEV_ERROR(dev, "rknpu device-tree data is missing!\n");
@@ -1460,43 +1331,21 @@ static int rknpu_probe(struct platform_device *pdev)
 
 	rknpu_dev->config = config;
 	rknpu_dev->dev = dev;
+
+	ret = dma_set_mask_and_coherent(dev, config->dma_mask);
+	if (ret) {
+		LOG_DEV_ERROR(dev, "failed to set DMA mask: %d\n", ret);
+		return ret;
+	}
+
 	dev_set_drvdata(dev, rknpu_dev);
-	rknpu_dev->iommu_pm_dev = NULL;
-	rknpu_dev->iommu_pm_held = false;
 
 	rknpu_dev->iommu_en = rknpu_is_iommu_enable(dev);
 	if (rknpu_dev->iommu_en) {
 		rknpu_dev->iommu_group = iommu_group_get(dev);
-		if (!rknpu_dev->iommu_group) {
-			#ifdef RKNPU_DKMS
-			LOG_DEV_WARN(dev,
-				     "IOMMU enabled but no iommu_group; falling back to non-IOMMU mode\n");
-			rknpu_dev->iommu_en = false;
-			#else
+		if (!rknpu_dev->iommu_group)
 			return -EINVAL;
-			#endif
-		}
-		if (rknpu_dev->iommu_en) {
-			struct device_node *iommu_np;
-			struct platform_device *iommu_pdev;
-
-			iommu_np = of_parse_phandle(dev->of_node, "iommus", 0);
-			if (iommu_np) {
-				iommu_pdev = of_find_device_by_node(iommu_np);
-				of_node_put(iommu_np);
-				if (iommu_pdev)
-					rknpu_dev->iommu_pm_dev = &iommu_pdev->dev;
-			}
-		}
-	}
-
-#ifdef RKNPU_DKMS
-	LOG_DEV_INFO(dev, "DKMS: iommu_en=%d iommu_group=%p\n",
-		     rknpu_dev->iommu_en, rknpu_dev->iommu_group);
-	pr_info(LOG_TAG ": DKMS: iommu_en=%d iommu_group=%p\n",
-		rknpu_dev->iommu_en, rknpu_dev->iommu_group);
-#endif
-	if (!rknpu_dev->iommu_en) {
+	} else {
 		/* Initialize reserved memory resources */
 		ret = of_reserved_mem_device_init(dev);
 		if (!ret) {
@@ -1510,10 +1359,6 @@ static int rknpu_probe(struct platform_device *pdev)
 	rknpu_dev->bypass_soft_reset = bypass_soft_reset;
 
 	rknpu_reset_get(rknpu_dev);
-
-#ifdef RKNPU_DKMS
-	dev_err(dev, "DKMS: after rknpu_reset_get\n");
-#endif
 
 	rknpu_dev->num_clks = devm_clk_bulk_get_all(dev, &rknpu_dev->clks);
 	if (rknpu_dev->num_clks < 1) {
@@ -1568,31 +1413,18 @@ static int rknpu_probe(struct platform_device *pdev)
 			return -ENXIO;
 		}
 
-		if (rknpu_dev->iommu_en) {
-			rknpu_dev->base[i] = devm_ioremap(dev, res->start, resource_size(res));
-			if (!rknpu_dev->base[i]) {
-				LOG_DEV_ERROR(dev,
-					      "failed to remap register for rknpu\n");
-				return -ENOMEM;
-			}
-		} else {
-			rknpu_dev->base[i] = devm_ioremap_resource(dev, res);
-			if (PTR_ERR(rknpu_dev->base[i]) == -EBUSY) {
-				rknpu_dev->base[i] = devm_ioremap(dev, res->start,
+		rknpu_dev->base[i] = devm_ioremap_resource(dev, res);
+		if (PTR_ERR(rknpu_dev->base[i]) == -EBUSY) {
+			rknpu_dev->base[i] = devm_ioremap(dev, res->start,
 							  resource_size(res));
-			}
+		}
 
-			if (IS_ERR(rknpu_dev->base[i])) {
-				LOG_DEV_ERROR(dev,
-					      "failed to remap register for rknpu\n");
-				return PTR_ERR(rknpu_dev->base[i]);
-			}
+		if (IS_ERR(rknpu_dev->base[i])) {
+			LOG_DEV_ERROR(dev,
+				      "failed to remap register for rknpu\n");
+			return PTR_ERR(rknpu_dev->base[i]);
 		}
 	}
-
-#ifdef RKNPU_DKMS
-	dev_err(dev, "DKMS: mapped regs\n");
-#endif
 
 	if (config->bw_priority_length > 0) {
 		rknpu_dev->bw_priority_base =
@@ -1618,17 +1450,6 @@ static int rknpu_probe(struct platform_device *pdev)
 	ret = rknpu_drm_probe(rknpu_dev);
 	if (ret) {
 		LOG_DEV_ERROR(dev, "failed to probe device for rknpu\n");
-		return ret;
-	}
-#endif
-#ifdef RKNPU_DKMS_MISCDEV
-	rknpu_dev->miscdev.minor = MISC_DYNAMIC_MINOR;
-	rknpu_dev->miscdev.name = "rknpu";
-	rknpu_dev->miscdev.fops = &rknpu_fops;
-
-	ret = misc_register(&rknpu_dev->miscdev);
-	if (ret) {
-		LOG_DEV_ERROR(dev, "cannot register miscdev (%d)\n", ret);
 		return ret;
 	}
 #endif
@@ -1665,11 +1486,9 @@ static int rknpu_probe(struct platform_device *pdev)
 #endif
 
 	platform_set_drvdata(pdev, rknpu_dev);
-	rknpu_global_dev = rknpu_dev;
 
 	pm_runtime_enable(dev);
 
-#ifndef RKNPU_DKMS
 	if (of_count_phandle_with_args(dev->of_node, "power-domains",
 				       "#power-domain-cells") > 1) {
 		virt_dev = dev_pm_domain_attach_by_name(dev, "npu0");
@@ -1685,17 +1504,10 @@ static int rknpu_probe(struct platform_device *pdev)
 		}
 		rknpu_dev->multiple_domains = true;
 	}
-#endif
 
 	ret = rknpu_power_on(rknpu_dev);
-	if (ret) {
-		LOG_DEV_ERROR(dev, "rknpu_power_on failed: %d\n", ret);
+	if (ret)
 		goto err_remove_drv;
-	}
-
-#ifdef RKNPU_DKMS
-	pr_info(LOG_TAG ": DKMS: rknpu_power_on ok\n");
-#endif
 
 #ifndef FPGA_PLATFORM
 	rknpu_devfreq_init(rknpu_dev);
@@ -1743,10 +1555,6 @@ static int rknpu_probe(struct platform_device *pdev)
 	rknpu_debugger_init(rknpu_dev);
 	rknpu_init_timer(rknpu_dev);
 
-#ifdef RKNPU_DKMS
-	LOG_DEV_INFO(dev, "DKMS: rknpu_probe success\n");
-#endif
-
 	return 0;
 
 err_remove_wq:
@@ -1761,17 +1569,9 @@ err_remove_drv:
 #ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
 	rknpu_drm_remove(rknpu_dev);
 #endif
-#if defined(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP) || defined(RKNPU_DKMS_MISCDEV)
+#ifdef CONFIG_ROCKCHIP_RKNPU_DMA_HEAP
 	misc_deregister(&(rknpu_dev->miscdev));
 #endif
-	if (rknpu_dev->iommu_pm_dev) {
-		if (rknpu_dev->iommu_pm_held) {
-			pm_runtime_put_sync(rknpu_dev->iommu_pm_dev);
-			rknpu_dev->iommu_pm_held = false;
-		}
-		put_device(rknpu_dev->iommu_pm_dev);
-		rknpu_dev->iommu_pm_dev = NULL;
-	}
 
 	return ret;
 }
@@ -1780,35 +1580,9 @@ static void rknpu_remove(struct platform_device *pdev)
 {
 	struct rknpu_device *rknpu_dev = platform_get_drvdata(pdev);
 	int i = 0;
-	int ret = 0;
-	bool hw_on = false;
-	bool need_power_on = false;
-
-	if (rknpu_global_dev == rknpu_dev)
-		rknpu_global_dev = NULL;
 
 	cancel_delayed_work_sync(&rknpu_dev->power_off_work);
 	destroy_workqueue(rknpu_dev->power_off_wq);
-
-	mutex_lock(&rknpu_dev->power_lock);
-	if (atomic_read(&rknpu_dev->power_refcount) == 0) {
-		atomic_set(&rknpu_dev->power_refcount, 1);
-		need_power_on = true;
-	}
-	mutex_unlock(&rknpu_dev->power_lock);
-
-	if (need_power_on) {
-		ret = rknpu_power_on(rknpu_dev);
-		if (!ret) {
-			hw_on = true;
-		} else {
-			mutex_lock(&rknpu_dev->power_lock);
-			atomic_set(&rknpu_dev->power_refcount, 0);
-			mutex_unlock(&rknpu_dev->power_lock);
-		}
-	} else {
-		hw_on = true;
-	}
 
 	rknpu_debugger_remove(rknpu_dev);
 	rknpu_cancel_timer(rknpu_dev);
@@ -1831,21 +1605,15 @@ static void rknpu_remove(struct platform_device *pdev)
 	if (IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_SRAM) && rknpu_dev->sram_mm)
 		rknpu_mm_destroy(rknpu_dev->sram_mm);
 
+	if (rknpu_dev->iommu_en) {
+		rknpu_iommu_free_domains(rknpu_dev);
+		iommu_group_put(rknpu_dev->iommu_group);
+	}
+
 #ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
 	rknpu_drm_remove(rknpu_dev);
 #endif
-
-	if (rknpu_dev->iommu_en) {
-		if (hw_on) {
-			rknpu_iommu_free_domains(rknpu_dev);
-			iommu_group_put(rknpu_dev->iommu_group);
-		} else {
-			LOG_DEV_WARN(rknpu_dev->dev,
-				     "skip iommu domain/group teardown because device could not be powered on during remove\n");
-		}
-	}
-
-#if defined(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP) || defined(RKNPU_DKMS_MISCDEV)
+#ifdef CONFIG_ROCKCHIP_RKNPU_DMA_HEAP
 	misc_deregister(&(rknpu_dev->miscdev));
 #endif
 
@@ -1854,10 +1622,8 @@ static void rknpu_remove(struct platform_device *pdev)
 #endif
 
 	mutex_lock(&rknpu_dev->power_lock);
-	if (atomic_read(&rknpu_dev->power_refcount) > 0) {
+	if (atomic_read(&rknpu_dev->power_refcount) > 0)
 		rknpu_power_off(rknpu_dev);
-		atomic_set(&rknpu_dev->power_refcount, 0);
-	}
 	mutex_unlock(&rknpu_dev->power_lock);
 
 	if (rknpu_dev->multiple_domains) {
@@ -1870,14 +1636,8 @@ static void rknpu_remove(struct platform_device *pdev)
 	}
 
 	pm_runtime_disable(&pdev->dev);
-	if (rknpu_dev->iommu_pm_dev) {
-		if (rknpu_dev->iommu_pm_held) {
-			pm_runtime_put_sync(rknpu_dev->iommu_pm_dev);
-			rknpu_dev->iommu_pm_held = false;
-		}
-		put_device(rknpu_dev->iommu_pm_dev);
-		rknpu_dev->iommu_pm_dev = NULL;
-	}
+
+	
 }
 
 #ifndef FPGA_PLATFORM
@@ -1932,9 +1692,6 @@ static struct platform_driver rknpu_driver = {
 
 static int rknpu_init(void)
 {
-#ifdef RKNPU_DKMS
-	pr_err(LOG_TAG ": DKMS: module init\n");
-#endif
 	return platform_driver_register(&rknpu_driver);
 }
 
@@ -1943,7 +1700,7 @@ static void rknpu_exit(void)
 	platform_driver_unregister(&rknpu_driver);
 }
 
-module_init(rknpu_init);
+late_initcall(rknpu_init);
 module_exit(rknpu_exit);
 
 MODULE_DESCRIPTION("RKNPU driver");
@@ -1953,5 +1710,5 @@ MODULE_LICENSE("GPL v2");
 MODULE_VERSION(RKNPU_GET_DRV_VERSION_STRING(DRIVER_MAJOR, DRIVER_MINOR,
 					    DRIVER_PATCHLEVEL));
 #if KERNEL_VERSION(5, 16, 0) < LINUX_VERSION_CODE
-MODULE_IMPORT_NS(DMA_BUF);
+MODULE_IMPORT_NS("DMA_BUF");
 #endif

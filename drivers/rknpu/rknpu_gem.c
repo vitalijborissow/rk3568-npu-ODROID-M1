@@ -14,8 +14,14 @@
 #include <linux/shmem_fs.h>
 #include <linux/dma-buf.h>
 #include <linux/iommu.h>
-#include <linux/pfn_t.h>
 #include <linux/version.h>
+/* Kernel 6.2+ removed pfn_t.h, vmf_insert_mixed now takes unsigned long directly */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 2, 0)
+#include <linux/pfn_t.h>
+#define RKNPU_PFN_ARG(pfn) __pfn_to_pfn_t(pfn, PFN_DEV)
+#else
+#define RKNPU_PFN_ARG(pfn) (pfn)
+#endif
 #include <asm/cacheflush.h>
 #include <linux/vmalloc.h>
 
@@ -175,7 +181,7 @@ static void rknpu_dkms_untrack_gem_obj(struct rknpu_gem_object *obj)
 }
 #endif
 
-#define RKNPU_GEM_ALLOC_FROM_PAGES 1
+#define RKNPU_GEM_ALLOC_FROM_PAGES 0
 
 #if RKNPU_GEM_ALLOC_FROM_PAGES
 static int rknpu_gem_get_pages(struct rknpu_gem_object *rknpu_obj)
@@ -354,7 +360,7 @@ static int rknpu_gem_alloc_buf(struct rknpu_gem_object *rknpu_obj)
 	    rknpu_dev->config->dma_mask <= DMA_BIT_MASK(32) ||
 	    (rknpu_obj->flags & RKNPU_MEM_DMA32)) {
 		gfp_mask &= ~__GFP_HIGHMEM;
-		gfp_mask |= __GFP_DMA32;
+		gfp_mask |= __GFP_DMA;
 	}
 
 	nr_pages = rknpu_obj->size >> PAGE_SHIFT;
@@ -574,7 +580,7 @@ static struct rknpu_gem_object *rknpu_gem_init(struct drm_device *drm,
 	    rknpu_dev->config->dma_mask <= DMA_BIT_MASK(32) ||
 	    (rknpu_obj->flags & RKNPU_MEM_DMA32)) {
 		gfp_mask &= ~__GFP_HIGHMEM;
-		gfp_mask |= __GFP_DMA32;
+		gfp_mask |= __GFP_DMA;
 	}
 
 	mapping_set_gfp_mask(obj->filp->f_mapping, gfp_mask);
@@ -1295,9 +1301,7 @@ static int rknpu_gem_mmap_cache(struct rknpu_gem_object *rknpu_obj,
 				enum rknpu_cache_type cache_type)
 {
 	struct drm_device *drm = rknpu_obj->base.dev;
-#if RKNPU_GEM_ALLOC_FROM_PAGES
 	struct rknpu_device *rknpu_dev = drm->dev_private;
-#endif
 	unsigned long vm_size = 0;
 	int ret = -EINVAL;
 	unsigned long offset = 0;
@@ -1369,9 +1373,7 @@ static int rknpu_gem_mmap_buffer(struct rknpu_gem_object *rknpu_obj,
 				 struct vm_area_struct *vma)
 {
 	struct drm_device *drm = rknpu_obj->base.dev;
-#if RKNPU_GEM_ALLOC_FROM_PAGES
 	struct rknpu_device *rknpu_dev = drm->dev_private;
-#endif
 	unsigned long vm_size = 0;
 	int ret = -EINVAL;
 
@@ -1506,7 +1508,7 @@ vm_fault_t rknpu_gem_fault(struct vm_fault *vmf)
 
 	pfn = page_to_pfn(rknpu_obj->pages[page_offset]);
 	return vmf_insert_mixed(vma, vmf->address,
-				__pfn_to_pfn_t(pfn, PFN_DEV));
+				RKNPU_PFN_ARG(pfn));
 }
 #elif KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
 int rknpu_gem_fault(struct vm_fault *vmf)
@@ -1528,7 +1530,7 @@ int rknpu_gem_fault(struct vm_fault *vmf)
 	}
 
 	pfn = page_to_pfn(rknpu_obj->pages[page_offset]);
-	ret = vm_insert_mixed(vma, vmf->address, __pfn_to_pfn_t(pfn, PFN_DEV));
+	ret = vm_insert_mixed(vma, vmf->address, RKNPU_PFN_ARG(pfn));
 
 out:
 	switch (ret) {
@@ -1563,7 +1565,7 @@ int rknpu_gem_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 
 	pfn = page_to_pfn(rknpu_obj->pages[page_offset]);
 	ret = vm_insert_mixed(vma, (unsigned long)vmf->virtual_address,
-			      __pfn_to_pfn_t(pfn, PFN_DEV));
+			      RKNPU_PFN_ARG(pfn));
 
 out:
 	switch (ret) {

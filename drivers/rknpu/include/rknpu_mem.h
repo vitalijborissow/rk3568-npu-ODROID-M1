@@ -10,8 +10,6 @@
 #include <linux/mm_types.h>
 #include <linux/version.h>
 
-struct file;
-
 /*
  * rknpu DMA buffer structure.
  *
@@ -44,13 +42,6 @@ int rknpu_mem_create_ioctl(struct rknpu_device *rknpu_dev, struct file *file,
 			   unsigned int cmd, unsigned long data);
 int rknpu_mem_destroy_ioctl(struct rknpu_device *rknpu_dev, struct file *file,
 			    unsigned long data);
-int rknpu_mem_sync_ioctl(struct rknpu_device *rknpu_dev, struct file *file,
-			 unsigned long data);
-
-#ifdef RKNPU_DKMS_MISCDEV
-struct rknpu_mem_object *rknpu_mem_find_by_obj_addr(struct rknpu_device *rknpu_dev,
-						    struct file *file,
-						    __u64 obj_addr);
-#endif
+int rknpu_mem_sync_ioctl(struct rknpu_device *rknpu_dev, struct file *file, unsigned long data);
 
 #endif

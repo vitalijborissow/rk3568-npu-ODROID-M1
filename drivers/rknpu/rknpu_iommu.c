@@ -8,20 +8,10 @@
 #include <linux/delay.h>
 #include <linux/jiffies.h>
 #include <linux/scatterlist.h>
-#include <linux/moduleparam.h>
 
 #include "rknpu_iommu.h"
 
 #define RKNPU_SWITCH_DOMAIN_WAIT_TIME_MS 6000
-
-#ifdef RKNPU_DKMS
-static unsigned int dkms_iova_dma_limit;
-module_param(dkms_iova_dma_limit, uint, 0644);
-MODULE_PARM_DESC(
-	dkms_iova_dma_limit,
-	"DKMS: cap IOMMU IOVA allocation limit for rknpu (0=disabled; e.g. 0x7fffffff to force <2GiB)"
-);
-#endif
 
 #if KERNEL_VERSION(6, 5, 0) <= LINUX_VERSION_CODE
 #define sg_is_dma_bus_address(sg) sg_dma_is_bus_address(sg)
@@ -57,11 +47,6 @@ dma_addr_t rknpu_iommu_dma_alloc_iova(struct iommu_domain *domain, size_t size,
 #else
 	if (dev->bus_dma_mask)
 		dma_limit &= dev->bus_dma_mask;
-#endif
-
-#ifdef RKNPU_DKMS
-	if (dkms_iova_dma_limit)
-		dma_limit = min_t(u64, dma_limit, (u64)dkms_iova_dma_limit);
 #endif
 
 	if (domain->geometry.force_aperture)

@@ -15,9 +15,6 @@
 
 #ifndef FPGA_PLATFORM
 #ifdef CONFIG_PM_DEVFREQ
-#ifndef RKNPU_DKMS
-#include <../drivers/devfreq/governor.h>
-#endif
 #endif
 #endif
 
@@ -427,18 +424,13 @@ static int rknpu_debugfs_remove(struct rknpu_debugger *debugger)
 
 static int rknpu_debugfs_init(struct rknpu_debugger *debugger)
 {
-	struct rknpu_device *rknpu_dev =
-		container_of(debugger, struct rknpu_device, debugger);
-	char dir_name[64];
 	int ret;
 
-	/* Create unique directory name using device address to avoid conflicts */
-	snprintf(dir_name, sizeof(dir_name), "%s-%s",
-		 RKNPU_DEBUGGER_ROOT_NAME, dev_name(rknpu_dev->dev));
-
-	debugger->debugfs_dir = debugfs_create_dir(dir_name, NULL);
+	debugger->debugfs_dir =
+		debugfs_create_dir(RKNPU_DEBUGGER_ROOT_NAME, NULL);
 	if (IS_ERR_OR_NULL(debugger->debugfs_dir)) {
-		LOG_ERROR("failed on mkdir /sys/kernel/debug/%s\n", dir_name);
+		LOG_ERROR("failed on mkdir /sys/kernel/debug/%s\n",
+			  RKNPU_DEBUGGER_ROOT_NAME);
 		debugger->debugfs_dir = NULL;
 		return -EIO;
 	}
@@ -559,18 +551,11 @@ static int rknpu_procfs_remove(struct rknpu_debugger *debugger)
 
 static int rknpu_procfs_init(struct rknpu_debugger *debugger)
 {
-	struct rknpu_device *rknpu_dev =
-		container_of(debugger, struct rknpu_device, debugger);
-	char dir_name[64];
 	int ret;
 
-	/* Create unique directory name using device address to avoid conflicts */
-	snprintf(dir_name, sizeof(dir_name), "%s-%s",
-		 RKNPU_DEBUGGER_ROOT_NAME, dev_name(rknpu_dev->dev));
-
-	debugger->procfs_dir = proc_mkdir(dir_name, NULL);
+	debugger->procfs_dir = proc_mkdir(RKNPU_DEBUGGER_ROOT_NAME, NULL);
 	if (IS_ERR_OR_NULL(debugger->procfs_dir)) {
-		pr_err("failed on mkdir /proc/%s\n", dir_name);
+		pr_err("failed on mkdir /proc/%s\n", RKNPU_DEBUGGER_ROOT_NAME);
 		debugger->procfs_dir = NULL;
 		return -EIO;
 	}
