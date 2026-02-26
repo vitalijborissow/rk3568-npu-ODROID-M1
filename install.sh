@@ -56,8 +56,84 @@ echo "  dma32-heap DKMS installed."
 
 echo "[3/6] Compiling and installing DT overlay..."
 mkdir -p /boot/overlay-user
-dtc -@ -I dts -O dtb -o /boot/overlay-user/rknpu.dtbo \
-    "$SCRIPT_DIR/overlays/rknpu.dts" 2>/dev/null
+
+# Read RKNPU_SRAM_PERCENT from Makefile (default 100)
+SRAM_PCT=$(grep '^RKNPU_SRAM_PERCENT' "$SCRIPT_DIR/drivers/rknpu/Makefile" \
+    | head -1 | grep -oP '\d+$' || echo 100)
+
+# SRAM total: 0xB000 = 45056 bytes = 11 pages of 4096
+SRAM_PAGES=11
+NPU_PAGES=$((SRAM_PAGES * SRAM_PCT / 100))
+RKVDEC_PAGES=$((SRAM_PAGES - NPU_PAGES))
+
+TMP_DTS=$(mktemp /tmp/rknpu-overlay.XXXXXX.dts)
+
+# Build DTS: take everything outside the SRAM markers, inject computed SRAM split
+{
+    # Part 1: everything before SRAM_SPLIT_BEGIN (strip SRAM_PHANDLE line if 0%)
+    awk '/SRAM_SPLIT_BEGIN/{exit} 1' "$SCRIPT_DIR/overlays/rknpu.dts" | \
+        if [ "$SRAM_PCT" -eq 0 ]; then grep -v 'SRAM_PHANDLE'; else cat; fi
+
+    # Part 2: SRAM fragment (skip if 0%)
+    if [ "$SRAM_PCT" -gt 0 ]; then
+        NPU_OFF=$((RKVDEC_PAGES * 4096))
+        NPU_SZ=$((NPU_PAGES * 4096))
+        NPU_OFF_HEX=$(printf '0x%x' $NPU_OFF)
+        NPU_SZ_HEX=$(printf '0x%x' $NPU_SZ)
+
+        if [ "$SRAM_PCT" -lt 100 ]; then
+            # Split: rkvdec bottom, NPU top
+            RKVDEC_SZ=$((RKVDEC_PAGES * 4096))
+            RKVDEC_SZ_HEX=$(printf '0x%x' $RKVDEC_SZ)
+            cat <<EOF
+	/* SRAM split: ${SRAM_PCT}% NPU (${NPU_SZ}B), ${RKVDEC_SZ}B rkvdec */
+	fragment@6 {
+		target-path = "/sram@fdcc0000";
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			rkvdec-sram@0 {
+				reg = <0x0 ${RKVDEC_SZ_HEX}>;
+			};
+
+			npu_sram: npu-sram@${NPU_OFF_HEX} {
+				reg = <${NPU_OFF_HEX} ${NPU_SZ_HEX}>;
+			};
+		};
+	};
+EOF
+        else
+            # 100%: all SRAM for NPU
+            cat <<EOF
+	/* NPU SRAM: all 44KB */
+	fragment@6 {
+		target-path = "/sram@fdcc0000";
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			npu_sram: npu-sram@0 {
+				reg = <0x0 0xb000>;
+			};
+		};
+	};
+EOF
+        fi
+    fi
+
+    # Part 3: everything after SRAM_SPLIT_END
+    awk 'p; /SRAM_SPLIT_END/{p=1}' "$SCRIPT_DIR/overlays/rknpu.dts"
+} > "$TMP_DTS"
+
+case "$SRAM_PCT" in
+    0)   echo "  SRAM: OFF (rkvdec keeps all 44KB)" ;;
+    100) echo "  SRAM: 100% NPU (44KB), rkvdec -> RAM" ;;
+    *)   echo "  SRAM: ${SRAM_PCT}% NPU ($((NPU_PAGES*4))KB), rkvdec ($((RKVDEC_PAGES*4))KB)" ;;
+esac
+
+dtc -@ -I dts -O dtb -o /boot/overlay-user/rknpu.dtbo "$TMP_DTS" 2>/dev/null
+rm -f "$TMP_DTS"
 echo "  rknpu.dtbo installed to /boot/overlay-user/"
 
 echo "[4/6] Configuring module autoload..."

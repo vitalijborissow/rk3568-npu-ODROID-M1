@@ -1587,20 +1587,6 @@ static int rknpu_probe(struct platform_device *pdev)
 #if defined(RKNPU_DKMS_SRAM_ENABLED)
 	if (IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_SRAM) && rknpu_dev->iommu_en) {
 		if (!rknpu_find_sram_resource(rknpu_dev)) {
-#if defined(RKNPU_SRAM_PERCENT) && RKNPU_SRAM_PERCENT < 100
-			{
-				uint32_t full = rknpu_dev->sram_size;
-				rknpu_dev->sram_size = round_down(
-					full * RKNPU_SRAM_PERCENT / 100,
-					PAGE_SIZE);
-				rknpu_dev->sram_end = rknpu_dev->sram_start +
-						      rknpu_dev->sram_size;
-				LOG_DEV_INFO(dev,
-					"SRAM capped to %u%% : %u -> %u bytes\n",
-					RKNPU_SRAM_PERCENT, full,
-					rknpu_dev->sram_size);
-			}
-#endif
 			ret = rknpu_mm_create(rknpu_dev->sram_size, PAGE_SIZE,
 					      &rknpu_dev->sram_mm);
 			if (ret != 0)

@@ -38,11 +38,11 @@
 				 <&cru 0x28>,
 				 <&cru 0x29>;
 			clock-names = "scmi_clk", "clk", "aclk", "hclk";
-			rockchip,sram = <&npu_sram>;
+			rockchip,sram = <&npu_sram>; /* SRAM_PHANDLE */
 		};
 	};
 
-	/* NPU SRAM: all 44KB of sram@fdcc0000 (replaces rkvdec allocation) */
+	/* SRAM_SPLIT_BEGIN — replaced by install.sh based on RKNPU_SRAM_PERCENT */
 	fragment@6 {
 		target-path = "/sram@fdcc0000";
 		__overlay__ {
@@ -54,6 +54,7 @@
 			};
 		};
 	};
+	/* SRAM_SPLIT_END */
 
 	/* Add power-domains to IOMMU node */
 	fragment@4 {
