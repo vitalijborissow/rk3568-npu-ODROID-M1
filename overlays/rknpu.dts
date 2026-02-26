@@ -30,7 +30,8 @@
 	/* Add power-domains, supply, SCMI+CRU clocks, and SRAM to NPU node */
 	fragment@3 {
 		target-path = "/npu@fde40000";
-		__overlay__ {
+		npu: __overlay__ {
+			#cooling-cells = <2>;
 			power-domains = <&power 0x06>;
 			rknpu-supply = <&vdd_npu>;
 			clocks = <&scmi_clk 0x02>,
@@ -71,6 +72,17 @@
 			opp-1000000000 {
 				opp-hz = /bits/ 64 <1000000000>;
 				opp-microvolt = <1050000 1050000 1200000>;
+			};
+		};
+	};
+
+	/* Bind NPU cooling device to gpu-thermal at 75°C (gpu_target trip) */
+	fragment@8 {
+		target-path = "/thermal-zones/gpu-thermal/cooling-maps";
+		__overlay__ {
+			map-npu {
+				trip = <&gpu_target>;
+				cooling-device = <&npu 0xffffffff 0xffffffff>;
 			};
 		};
 	};

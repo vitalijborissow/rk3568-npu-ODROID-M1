@@ -19,7 +19,7 @@
 | 5 | Procfs `/proc/rknpu/` | `-DCONFIG_ROCKCHIP_RKNPU_PROC_FS` | ✅ | ✅ Working | 8 entries: version, freq, load, power, volt, mm, reset, delayms |
 | 6 | Debugfs `/sys/kernel/debug/rknpu/` | `-DCONFIG_ROCKCHIP_RKNPU_DEBUG_FS` | ✅ | ✅ Working | 14 entries incl. clock_source, opp_bypass, freq_hz, voltage_mv |
 | 7 | Devfreq (DVFS) | `-DCONFIG_PM_DEVFREQ` | ✅ | ✅ Working | simple_ondemand governor, hybrid CRU (≤600 MHz) + SCMI (700–1000 MHz) |
-| 8 | SRAM support | `RKNPU_SRAM_PERCENT=100` | ✅ | ✅ Working | 44 KB @ 0xFDCC0000. Configurable: 0=OFF, 33/50/66/100=% of 44 KB |
+| 8 | SRAM support | `RKNPU_SRAM_PERCENT=100` | ✅ | ✅ Working | 44 KB shared with rkvdec. 0=all video, 50=split, 100=all NPU (default) |
 
 ---
 
@@ -36,8 +36,8 @@
 | 15 | OPP table (DVFS frequencies) | ✅ Working | 2026-02-26 | 200–1000 MHz all reachable. CRU ≤600 MHz, SCMI 700–1000 MHz. 1 GHz OPP added by overlay. |
 | 16 | Hardware resets | ✅ Working | 2026-02-26 | `srst_a`, `srst_h` via reset_control API |
 | 17 | NPU IRQ | ✅ Working | 2026-02-26 | GICv3 SPI 151 (0x97), shared with IOMMU |
-| 18 | SRAM hardware | ✅ Working | 2026-02-26 | 44 KB SRAM at 0xFDCC0000–0xFDCCB000. Wired in overlay. rkvdec falls back to RAM. |
-| 19 | Thermal throttling | ✅ Working | 2026-02-26 | `devfreq-fde40000.npu` cooling device, max_state=7, tied to thermal framework |
+| 18 | SRAM hardware | ✅ Working | 2026-02-26 | 44 KB SRAM at 0xFDCC0000–0xFDCCB000. Split between NPU and rkvdec via `RKNPU_SRAM_PERCENT`. |
+| 19 | Thermal throttling | ✅ Working | 2026-02-26 | Bound to gpu-thermal trip 1 (75°C passive). max_state=7. Throttles NPU freq on overheat. |
 
 ---
 
@@ -133,7 +133,7 @@
 | 61 | ~~Max 600 MHz without SCMI~~ | **FIXED** — SCMI now in repo overlay | 1000 MHz verified, 25.1 FPS YOLOv5s |
 | 62 | CMA 3 GB | ~4.5 GB free for general use (CMA is reusable but may fragment) | None — required for NPU DMA <4 GB |
 | 63 | RKNN library hardcodes `system` heap | Requires udev symlink workaround | Udev rule installed by `install.sh` |
-| 64 | ~~No SRAM acceleration~~ | **FIXED** — 44 KB SRAM wired in overlay | `RKNPU_SRAM_PERCENT` configurable (0/33/50/66/100) |
+| 64 | ~~No SRAM acceleration~~ | **FIXED** — 44 KB SRAM split in overlay | `RKNPU_SRAM_PERCENT`: 0=all video, 33/50/66=split, 100=all NPU |
 | 65 | `regulator-always-on` on vdd_npu | Modest extra power draw when NPU idle | None — required to prevent PD6 crash |
 | 66 | PD6 disabled in stock Armbian DTB | NPU won't work without overlay | `rknpu` overlay enables PD6 at boot |
 | 67 | IOMMU GFP_DMA32 patch in kernel | Not in stock Armbian; custom kernel needed for 8 GB | Use Armbian 6.18.9 build that includes this patch |
