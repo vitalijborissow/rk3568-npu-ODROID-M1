@@ -14,8 +14,11 @@ ccflags-y += -DCONFIG_ROCKCHIP_RKNPU_DEBUG_FS
 ccflags-y += -DCONFIG_PM_DEVFREQ
 # Misc device (/dev/rknpu) support - runs in parallel with DRM path
 ccflags-y += -DRKNPU_DKMS_MISCDEV_ENABLED -DRKNPU_DKMS_MISCDEV
-# SRAM support - requires DT rockchip,sram phandle (we patch out CONFIG_NO_GKI check)
+# SRAM support (ON/OFF) — comment out to disable SRAM entirely
+RKNPU_SRAM_ENABLED ?= 1
+ifeq ($(RKNPU_SRAM_ENABLED),1)
 ccflags-y += -DCONFIG_ROCKCHIP_RKNPU_SRAM -DRKNPU_DKMS_SRAM_ENABLED
+endif
 
 # Core driver files
 rknpu-y += rknpu_drv.o
@@ -29,5 +32,7 @@ rknpu-y += rknpu_mem.o
 # Full devfreq with DVFS support for kernel 6.18+
 rknpu-y += rknpu_devfreq_dkms.o
 rknpu-y += rknpu_debugfs_ctrl.o
-# SRAM memory manager
+# SRAM memory manager (only when SRAM enabled)
+ifeq ($(RKNPU_SRAM_ENABLED),1)
 rknpu-y += rknpu_mm.o
+endif

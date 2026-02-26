@@ -27,7 +27,7 @@
 		};
 	};
 
-	/* Add power-domains, supply, and SCMI+CRU clocks to NPU node */
+	/* Add power-domains, supply, SCMI+CRU clocks, and SRAM to NPU node */
 	fragment@3 {
 		target-path = "/npu@fde40000";
 		__overlay__ {
@@ -38,6 +38,20 @@
 				 <&cru 0x28>,
 				 <&cru 0x29>;
 			clock-names = "scmi_clk", "clk", "aclk", "hclk";
+			rockchip,sram = <&npu_sram>;
+		};
+	};
+
+	/* NPU SRAM: 12KB at offset 0x8000 inside sram@fdcc0000 */
+	fragment@6 {
+		target-path = "/sram@fdcc0000";
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			npu_sram: npu-sram@8000 {
+				reg = <0x8000 0x3000>;
+			};
 		};
 	};
 
@@ -50,7 +64,7 @@
 	};
 
 	/* Add 1 GHz OPP entry (SCMI supports up to 1000 MHz stable) */
-	fragment@5 {
+	fragment@7 {
 		target-path = "/npu-opp-table";
 		__overlay__ {
 			opp-1000000000 {
