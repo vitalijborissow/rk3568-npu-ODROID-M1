@@ -78,13 +78,15 @@
 
 	/* Bind NPU cooling to both thermal zones at 75°C trips.
 	 * RK3568 has 2 TSADC channels: ch0=CPU, ch1=GPU. No NPU sensor.
-	 * Binding to both ensures throttling regardless of which sensor heats first. */
+	 * Binding to both ensures throttling regardless of which sensor heats first.
+	 * contribution=1024 matches Rockchip 6.6 reference (equal weight). */
 	fragment@8 {
 		target-path = "/thermal-zones/gpu-thermal/cooling-maps";
 		__overlay__ {
 			map-npu {
 				trip = <&gpu_target>;
 				cooling-device = <&npu 0xffffffff 0xffffffff>;
+				contribution = <1024>;
 			};
 		};
 	};
@@ -95,7 +97,24 @@
 			map-npu {
 				trip = <&cpu_alert1>;
 				cooling-device = <&npu 0xffffffff 0xffffffff>;
+				contribution = <1024>;
 			};
+		};
+	};
+
+	/* Set sustainable-power on cpu-thermal for fair_share governor.
+	 * 905 mW matches Rockchip 6.6 reference for RK3568. */
+	fragment@10 {
+		target-path = "/thermal-zones/cpu-thermal";
+		__overlay__ {
+			sustainable-power = <905>;
+		};
+	};
+
+	fragment@11 {
+		target-path = "/thermal-zones/gpu-thermal";
+		__overlay__ {
+			sustainable-power = <905>;
 		};
 	};
 };

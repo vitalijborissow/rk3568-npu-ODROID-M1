@@ -37,7 +37,7 @@
 | 16 | Hardware resets | ✅ Working | 2026-02-26 | `srst_a`, `srst_h` via reset_control API |
 | 17 | NPU IRQ | ✅ Working | 2026-02-26 | GICv3 SPI 151 (0x97), shared with IOMMU |
 | 18 | SRAM hardware | ✅ Working | 2026-02-26 | 44 KB SRAM at 0xFDCC0000–0xFDCCB000. Split between NPU and rkvdec via `RKNPU_SRAM_PERCENT`. |
-| 19 | Thermal throttling | ✅ Working | 2026-02-27 | Bound to both cpu-thermal + gpu-thermal trip 1 (75°C). 2 TSADC sensors (CPU ch0, GPU ch1), no NPU sensor. max_state=7. |
+| 19 | Thermal throttling | ✅ Working | 2026-02-27 | Dual-zone: cpu-thermal + gpu-thermal trip 1 (75°C). 2 TSADC (CPU ch0, GPU ch1), no NPU sensor. sustainable-power=905mW, contribution=1024. All 4 governors work: step_wise, fair_share, bang_bang, user_space. power_allocator not in kernel. |
 
 ---
 
@@ -137,7 +137,7 @@
 | 65 | `regulator-always-on` on vdd_npu | Modest extra power draw when NPU idle | None — required to prevent PD6 crash |
 | 66 | PD6 disabled in stock Armbian DTB | NPU won't work without overlay | `rknpu` overlay enables PD6 at boot |
 | 67 | IOMMU GFP_DMA32 patch in kernel | Not in stock Armbian; custom kernel needed for 8 GB | Use Armbian 6.18.9 build that includes this patch |
-| 68 | ~~Thermal zone not attached~~ | **FIXED** — devfreq-cooling registered | `cooling_device2`, max_state=7 |
+| 68 | ~~Thermal zone not attached~~ | **FIXED** — dual-zone binding + governor support | Bound to cpu-thermal + gpu-thermal. All 4 compiled governors verified. |
 | 69 | DRM path ~50% slower than misc device | Use `/dev/rknpu` for best performance | Both paths available; misc device supports direct alloc since 2026-02-26 |
 | 70 | `simple_ondemand` governor idles at low freq | Poor perf if not explicitly set to `performance` | `echo performance > /sys/class/devfreq/fde40000.npu/governor` |
 | 71 | CRU freq accuracy | CRU gives approximate values (99/198/297 vs 100/200/300 MHz) | Cosmetic only |
