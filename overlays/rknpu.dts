@@ -27,12 +27,17 @@
 		};
 	};
 
-	/* Add power-domains and supply to NPU node */
+	/* Add power-domains, supply, and SCMI+CRU clocks to NPU node */
 	fragment@3 {
 		target-path = "/npu@fde40000";
 		__overlay__ {
 			power-domains = <&power 0x06>;
 			rknpu-supply = <&vdd_npu>;
+			clocks = <&scmi_clk 0x02>,
+				 <&cru 0x23>,
+				 <&cru 0x28>,
+				 <&cru 0x29>;
+			clock-names = "scmi_clk", "clk", "aclk", "hclk";
 		};
 	};
 
@@ -41,6 +46,17 @@
 		target-path = "/iommu@fde4b000";
 		__overlay__ {
 			power-domains = <&power 0x06>;
+		};
+	};
+
+	/* Add 1 GHz OPP entry (SCMI supports up to 1000 MHz stable) */
+	fragment@5 {
+		target-path = "/npu-opp-table";
+		__overlay__ {
+			opp-1000000000 {
+				opp-hz = /bits/ 64 <1000000000>;
+				opp-microvolt = <1050000 1050000 1200000>;
+			};
 		};
 	};
 };

@@ -18,7 +18,7 @@
 | 4 | Fence sync | `-DCONFIG_ROCKCHIP_RKNPU_FENCE` | ✅ | ✅ Working | DRM syncobj/sync_file support |
 | 5 | Procfs `/proc/rknpu/` | `-DCONFIG_ROCKCHIP_RKNPU_PROC_FS` | ✅ | ✅ Working | 8 entries: version, freq, load, power, volt, mm, reset, delayms |
 | 6 | Debugfs `/sys/kernel/debug/rknpu/` | `-DCONFIG_ROCKCHIP_RKNPU_DEBUG_FS` | ✅ | ✅ Working | 14 entries incl. clock_source, opp_bypass, freq_hz, voltage_mv |
-| 7 | Devfreq (DVFS) | `-DCONFIG_PM_DEVFREQ` | ✅ | ✅ Working | simple_ondemand governor, 600 MHz CRU-only |
+| 7 | Devfreq (DVFS) | `-DCONFIG_PM_DEVFREQ` | ✅ | ✅ Working | simple_ondemand governor, hybrid CRU (≤600 MHz) + SCMI (700–1000 MHz) |
 | 8 | SRAM support | `-DCONFIG_ROCKCHIP_RKNPU_SRAM -DRKNPU_DKMS_SRAM_ENABLED` | ✅ | ❌ No SRAM in DT | Code compiled but no `rockchip,sram` phandle in ODROID-M1 DTB |
 
 ---
@@ -32,8 +32,8 @@
 | 11 | vdd_npu regulator | ✅ Working | 2026-02-26 | DCDC_REG4 on RK809 PMIC, 900000 µV, enabled=1 |
 | 12 | regulator-always-on | ✅ Working | 2026-02-26 | Prevents PD6 power-off crash (set by overlay) |
 | 13 | CRU clocks (≤600 MHz) | ✅ Working | 2026-02-26 | 3 clocks: clk=600MHz, aclk=600MHz, hclk=150MHz |
-| 14 | SCMI clock (700–1000 MHz) | ❌ Not wired | — | Requires additional DT overlay (`rknpu-scmi-clk`). Was working 2026-02-09 up to 1 GHz. Not included in repo overlay. |
-| 15 | OPP table (DVFS frequencies) | ✅ Defined | 2026-02-26 | 200/297/400/600 MHz reachable (CRU). 700–900 MHz defined but unreachable without SCMI. |
+| 14 | SCMI clock (700–1000 MHz) | ✅ Working | 2026-02-26 | Wired in `rknpu` overlay via `&scmi_clk 0x02`. Verified at 1000 MHz. |
+| 15 | OPP table (DVFS frequencies) | ✅ Working | 2026-02-26 | 200–1000 MHz all reachable. CRU ≤600 MHz, SCMI 700–1000 MHz. 1 GHz OPP added by overlay. |
 | 16 | Hardware resets | ✅ Working | 2026-02-26 | `srst_a`, `srst_h` via reset_control API |
 | 17 | NPU IRQ | ✅ Working | 2026-02-26 | GICv3 SPI 151 (0x97), shared with IOMMU |
 | 18 | SRAM hardware | ❌ Not wired | — | 12 KB SRAM at 0xFDCC8000. Requires DT `rockchip,sram` phandle. Was available 2026-02-09 with overlay. Not in repo overlay. |
@@ -101,13 +101,13 @@
 
 | # | Model | Frequency | Avg Latency | FPS | Verified |
 |---|-------|-----------|-------------|-----|----------|
-| 48 | YOLOv5s 640×640 | 600 MHz (CRU) | ~56–80 ms | ~12–18 | 2026-02-26 |
-| 49 | YOLOv5s 640×640 | 1000 MHz (SCMI) | ~37–43 ms | ~23 | 2026-02-09 (SCMI overlay) |
-| 50 | YOLOv5s 640×640 | 1000 MHz (SCMI) | ~125 ms | ~8 | 2026-02-12 (different config) |
+| 48 | YOLOv5s 640×640 (C API) | 600 MHz (CRU) | 49.1 ms | 20.4 | 2026-02-26 |
+| 49 | YOLOv5s 640×640 (C API) | 1000 MHz (SCMI) | 39.8 ms | 25.1 | 2026-02-26 |
+| 50 | YOLOv5s 640×640 (Python) | 600 MHz (CRU) | 96.3 ms | 10.4 | 2026-02-26 |
 | 51 | YOLO11n | 600 MHz | ~4.1 ms | ~241 | 2026-02-12 |
 | 52 | YOLO11n | 1000 MHz (SCMI) | ~3.1 ms | ~321 | 2026-02-12 |
 
-**Note:** Performance varies by config. Row 50 was measured with a different DT/overlay set than row 49. SCMI clock is not included in the repo's current overlay.
+**Note:** C API measures `rknn_run()` only. Python includes ~47 ms rknnlite wrapper overhead.
 
 ---
 
@@ -119,10 +119,10 @@
 | 54 | ~297 MHz | 825 mV | CRU | ✅ Yes |
 | 55 | 400 MHz | 825 mV | CRU | ✅ Yes |
 | 56 | 600 MHz | 825 mV | CRU | ✅ Yes (default) |
-| 57 | 700 MHz | 900 mV | SCMI | ❌ No (needs SCMI overlay) |
-| 58 | 800 MHz | 950 mV | SCMI | ❌ No (needs SCMI overlay) |
-| 59 | 900 MHz | 1000 mV | SCMI | ❌ No (needs SCMI overlay) |
-| 60 | 1000 MHz | 1050 mV | SCMI | ❌ No (needs SCMI overlay) |
+| 57 | 700 MHz | 900 mV | SCMI | ✅ Yes |
+| 58 | 800 MHz | 950 mV | SCMI | ✅ Yes |
+| 59 | 900 MHz | 1000 mV | SCMI | ✅ Yes |
+| 60 | 1000 MHz | 1050 mV | SCMI | ✅ Yes |
 
 ---
 
@@ -130,7 +130,7 @@
 
 | # | Limitation | Impact | Workaround |
 |---|------------|--------|------------|
-| 61 | Max 600 MHz without SCMI | ~25% lower throughput vs BSP kernel | Add `rknpu-scmi-clk` overlay for SCMI clock wiring |
+| 61 | ~~Max 600 MHz without SCMI~~ | **FIXED** — SCMI now in repo overlay | 1000 MHz verified, 25.1 FPS YOLOv5s |
 | 62 | CMA 3 GB | ~4.5 GB free for general use (CMA is reusable but may fragment) | None — required for NPU DMA <4 GB |
 | 63 | RKNN library hardcodes `system` heap | Requires udev symlink workaround | Udev rule installed by `install.sh` |
 | 64 | No SRAM acceleration | Slightly lower throughput for small tensors | Add SRAM overlay with `rockchip,sram` phandle |
@@ -179,3 +179,5 @@ No `extraargs`, no `mem=3584M`. Full 7.5 GB RAM visible.
 | 2026-02-12 | `state_init = rk3576_state_init` fix — resolves all job timeouts |
 | 2026-02-12 | 3-layer 8 GB fix: kernel IOMMU patch + GEM __GFP_DMA + CMA symlink |
 | 2026-02-26 | GitHub repo created with full DKMS source, install.sh, overlay, dma32-heap |
+| 2026-02-26 | Direct alloc on /dev/rknpu (removed import-only limitation) |
+| 2026-02-26 | SCMI clock + OPP 1 GHz wired into repo overlay — full DVFS 200–1000 MHz |
