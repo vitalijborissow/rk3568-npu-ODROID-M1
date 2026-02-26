@@ -1,0 +1,46 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+	/* Enable PD6 (NPU power domain) */
+	fragment@0 {
+		target-path = "/power-management@fdd90000/power-controller/power-domain@6";
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	/* Wire npu-supply to power controller */
+	fragment@1 {
+		target-path = "/power-management@fdd90000/power-controller";
+		__overlay__ {
+			npu-supply = <&vdd_npu>;
+		};
+	};
+
+	/* Force vdd_npu regulator always-on */
+	fragment@2 {
+		target-path = "/i2c@fdd40000/pmic@20/regulators/DCDC_REG4";
+		__overlay__ {
+			regulator-always-on;
+			regulator-boot-on;
+		};
+	};
+
+	/* Add power-domains and supply to NPU node */
+	fragment@3 {
+		target-path = "/npu@fde40000";
+		__overlay__ {
+			power-domains = <&power 0x06>;
+			rknpu-supply = <&vdd_npu>;
+		};
+	};
+
+	/* Add power-domains to IOMMU node */
+	fragment@4 {
+		target-path = "/iommu@fde4b000";
+		__overlay__ {
+			power-domains = <&power 0x06>;
+		};
+	};
+};

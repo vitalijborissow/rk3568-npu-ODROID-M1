@@ -1,0 +1,73 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (C) Rockchip Electronics Co., Ltd.
+ * Author: Felix Zeng <felix.zeng@rock-chips.com>
+ */
+
+#ifndef __LINUX_RKNPU_DEBUGGER_H_
+#define __LINUX_RKNPU_DEBUGGER_H_
+
+#include <linux/seq_file.h>
+
+/*
+ * struct rknpu_debugger - rknpu debugger information
+ *
+ * This structure represents a debugger to be created by the rknpu driver
+ * or core.
+ */
+struct rknpu_debugger {
+	struct mutex lock;
+	/* debugfs (/sys/kernel/debug/rknpu/) */
+	struct dentry *debugfs_dir;
+	struct list_head debugfs_entry_list;
+	/* procfs (/proc/rknpu/) */
+	struct proc_dir_entry *procfs_dir;
+	struct list_head procfs_entry_list;
+};
+
+/*
+ * struct rknpu_debugger_list - debugfs/procfs info list entry
+ *
+ * This structure represents a debugfs/procfs file to be created by the npu
+ * driver or core.
+ */
+struct rknpu_debugger_list {
+	/* File name */
+	const char *name;
+	/*
+	 * Show callback. &seq_file->private will be set to the &struct
+	 * rknpu_debugger_node corresponding to the instance of this info
+	 * on a given &struct rknpu_debugger.
+	 */
+	int (*show)(struct seq_file *seq, void *data);
+	/*
+	 * Write callback. &seq_file->private will be set to the &struct
+	 * rknpu_debugger_node corresponding to the instance of this info
+	 * on a given &struct rknpu_debugger.
+	 */
+	ssize_t (*write)(struct file *file, const char __user *ubuf, size_t len,
+			 loff_t *offp);
+	/* Procfs/Debugfs private data. */
+	void *data;
+};
+
+/*
+ * struct rknpu_debugger_node - Nodes for debugfs/procfs
+ *
+ * This structure represents each instance of procfs/debugfs created from the
+ * template.
+ */
+struct rknpu_debugger_node {
+	struct rknpu_debugger *debugger;
+	const struct rknpu_debugger_list *info_ent;
+	struct dentry *dent;
+	struct proc_dir_entry *pent;
+	struct list_head list;
+};
+
+struct rknpu_device;
+
+int rknpu_debugger_init(struct rknpu_device *rknpu_dev);
+int rknpu_debugger_remove(struct rknpu_device *rknpu_dev);
+
+#endif /* __LINUX_RKNPU_DEBUGGER_H_ */
