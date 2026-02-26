@@ -42,15 +42,15 @@
 		};
 	};
 
-	/* NPU SRAM: 12KB at offset 0x8000 inside sram@fdcc0000 */
+	/* NPU SRAM: all 44KB of sram@fdcc0000 (replaces rkvdec allocation) */
 	fragment@6 {
 		target-path = "/sram@fdcc0000";
 		__overlay__ {
 			#address-cells = <1>;
 			#size-cells = <1>;
 
-			npu_sram: npu-sram@8000 {
-				reg = <0x8000 0x3000>;
+			npu_sram: npu-sram@0 {
+				reg = <0x0 0xb000>;
 			};
 		};
 	};
