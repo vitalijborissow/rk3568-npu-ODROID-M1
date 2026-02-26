@@ -309,17 +309,12 @@ int rknpu_devfreq_init(struct rknpu_device *rknpu_dev)
 	 */
 	rknpu_dev->scmi_clk = NULL;
 
-	/* Try clock-names in order: "scmi_clk" (Rockchip DTS), then "scmi" */
+	/* Get SCMI clock by DT clock-names entry "scmi_clk" */
 	rknpu_dev->scmi_clk = devm_clk_get(dev, "scmi_clk");
 	if (IS_ERR(rknpu_dev->scmi_clk)) {
-		dev_dbg(dev, "SCMI clock 'scmi_clk' not found (%ld), trying 'scmi'\n",
+		dev_dbg(dev, "SCMI clock 'scmi_clk' not found (%ld)\n",
 			PTR_ERR(rknpu_dev->scmi_clk));
-		rknpu_dev->scmi_clk = devm_clk_get(dev, "scmi");
-		if (IS_ERR(rknpu_dev->scmi_clk)) {
-			dev_dbg(dev, "SCMI clock 'scmi' not found (%ld)\n",
-				PTR_ERR(rknpu_dev->scmi_clk));
-			rknpu_dev->scmi_clk = NULL;
-		}
+		rknpu_dev->scmi_clk = NULL;
 	}
 
 	if (!rknpu_dev->scmi_clk) {
