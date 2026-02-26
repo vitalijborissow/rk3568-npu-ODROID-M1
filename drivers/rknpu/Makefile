@@ -14,10 +14,16 @@ ccflags-y += -DCONFIG_ROCKCHIP_RKNPU_DEBUG_FS
 ccflags-y += -DCONFIG_PM_DEVFREQ
 # Misc device (/dev/rknpu) support - runs in parallel with DRM path
 ccflags-y += -DRKNPU_DKMS_MISCDEV_ENABLED -DRKNPU_DKMS_MISCDEV
-# SRAM support (ON/OFF) — comment out to disable SRAM entirely
-RKNPU_SRAM_ENABLED ?= 1
-ifeq ($(RKNPU_SRAM_ENABLED),1)
+# SRAM support — set percentage of DT-reported SRAM to use for NPU:
+#   0   = OFF (no SRAM code compiled)
+#   33  = 1/3 of SRAM
+#   50  = 1/2 of SRAM
+#   66  = 2/3 of SRAM
+#   100 = all SRAM (default)
+RKNPU_SRAM_PERCENT ?= 100
+ifneq ($(RKNPU_SRAM_PERCENT),0)
 ccflags-y += -DCONFIG_ROCKCHIP_RKNPU_SRAM -DRKNPU_DKMS_SRAM_ENABLED
+ccflags-y += -DRKNPU_SRAM_PERCENT=$(RKNPU_SRAM_PERCENT)
 endif
 
 # Core driver files
@@ -33,6 +39,6 @@ rknpu-y += rknpu_mem.o
 rknpu-y += rknpu_devfreq_dkms.o
 rknpu-y += rknpu_debugfs_ctrl.o
 # SRAM memory manager (only when SRAM enabled)
-ifeq ($(RKNPU_SRAM_ENABLED),1)
+ifneq ($(RKNPU_SRAM_PERCENT),0)
 rknpu-y += rknpu_mm.o
 endif
