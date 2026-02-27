@@ -126,8 +126,7 @@
 | 62 | `regulator-always-on` on vdd_npu | Modest extra power draw when NPU idle | None — required to prevent PD6 crash |
 | 63 | PD6 disabled in stock Armbian DTB | NPU won't work without overlay | `rknpu` overlay enables PD6 at boot |
 | 64 | IOMMU GFP_DMA32 patch in kernel | Not in stock Armbian; custom kernel needed for 8 GB | Use Armbian 6.18.9 build that includes this patch |
-| 65 | DRM path ~50% slower than misc device | Use `/dev/rknpu` for best performance | Both paths available; misc device supports direct alloc |
-| 66 | SCMI freq accuracy | SCMI gives approximate values at low end (198/297/396 vs 200/300/400 MHz) | Cosmetic only |
+| 65 | SCMI freq accuracy | SCMI gives approximate values at low end (198/297/396 vs 200/300/400 MHz) | Cosmetic only |
 | 67 | SCMI 1100+ MHz crashes | SCMI gap: 1100 maps to 594 MHz, 1188 MHz crashes board | Capped at 1000 MHz |
 
 ---
