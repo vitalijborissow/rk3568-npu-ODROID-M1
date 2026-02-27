@@ -176,7 +176,6 @@ int rknpu_devfreq_init(struct rknpu_device *rknpu_dev)
 	dev_info(dev, "RKNPU: SCMI clock %lu MHz\n",
 		 rknpu_dev->current_freq / 1000000);
 
-	/* Set initial values in profile */
 	rknpu_devfreq_profile.initial_freq = rknpu_dev->current_freq;
 
 	/* Allocate and configure simple_ondemand governor data
