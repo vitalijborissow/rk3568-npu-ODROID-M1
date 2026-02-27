@@ -154,17 +154,6 @@ ACTION=="add", SUBSYSTEM=="dma_heap", KERNEL=="dma32", RUN+="/bin/sh -c 'rm -f /
 EOF
 echo "  Udev rules installed (DMA heap → dma32)."
 
-# Clean up stale devfreq services that may clamp NPU frequency
-rm -f /etc/udev/rules.d/99-rknpu-devfreq.rules
-rm -f /etc/modprobe.d/rknpu-devfreq.conf
-for svc in rknpu-devfreq npu-performance; do
-    systemctl disable "$svc.service" 2>/dev/null || true
-    systemctl stop "$svc.service" 2>/dev/null || true
-    rm -f "/etc/systemd/system/$svc.service"
-done
-systemctl daemon-reload
-echo "  Stale devfreq services removed (range managed by driver OPP table)."
-
 echo "[6/6] Removing any stale blacklists..."
 rm -f /etc/modprobe.d/blacklist-rknpu.conf
 rm -f /etc/modprobe.d/blacklist-npu.conf
