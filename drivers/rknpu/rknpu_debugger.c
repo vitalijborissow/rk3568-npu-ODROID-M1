@@ -308,10 +308,7 @@ static int rknpu_reset_show(struct seq_file *m, void *data)
 		return 0;
 	}
 
-	if (!rknpu_dev->bypass_soft_reset)
-		seq_puts(m, "on\n");
-	else
-		seq_puts(m, "off\n");
+	seq_puts(m, "enabled\n");
 
 	return 0;
 }
@@ -334,10 +331,6 @@ static ssize_t rknpu_reset_set(struct file *file, const char __user *ubuf,
 	if (strcmp(buf, "1") == 0 &&
 	    atomic_read(&rknpu_dev->power_refcount) > 0)
 		rknpu_soft_reset(rknpu_dev);
-	else if (strcmp(buf, "on") == 0)
-		rknpu_dev->bypass_soft_reset = 0;
-	else if (strcmp(buf, "off") == 0)
-		rknpu_dev->bypass_soft_reset = 1;
 
 	return len;
 }

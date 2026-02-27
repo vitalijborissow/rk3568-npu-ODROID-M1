@@ -41,17 +41,16 @@
 
 ---
 
-## 8 GB RAM Support (3-Layer Fix)
+## 8 GB RAM Support (2-Layer Fix)
 
 | # | Layer | Status | Verified | Notes |
 |---|-------|--------|----------|-------|
 | 20 | Kernel IOMMU `GFP_DMA32` patch | ✅ Applied | 2026-02-12 | Compiled into Armbian 6.18.9 kernel. Constrains IOMMU page tables to <4 GB. |
 | 21 | Driver GEM `__GFP_DMA` + `ALLOC_FROM_PAGES=0` | ✅ Applied | 2026-02-26 | Forces `dma_alloc_attrs()` path with 32-bit DMA mask |
 | 22 | `dma_set_mask_and_coherent(32-bit)` | ✅ Applied | 2026-02-26 | Set in `rknpu_probe()` from `rk356x_rknpu_config.dma_mask` |
-| 23 | Udev CMA symlink `/dev/dma_heap/system → linux,cma` | ✅ Applied | 2026-02-26 | Redirects RKNN library allocations to CMA <4 GB |
-| 24 | CMA 3 GB `alloc-ranges <4 GB` | ✅ In DTB | 2026-02-26 | DTB reserved-memory node constrains CMA to physical addresses <4 GB |
-| 25 | dma32-heap DKMS module | ✅ Working | 2026-02-26 | `/dev/dma_heap/dma32` — backup heap below 4 GB |
-| 26 | Full 7.5 GB RAM visible | ✅ Working | 2026-02-26 | No `mem=3584M` needed |
+| 23 | Udev dma32 symlink `/dev/dma_heap/system → dma32` | ✅ Applied | 2026-02-27 | Redirects RKNN library allocations to dma32 heap (<4 GB) |
+| 24 | dma32-heap DKMS module | ✅ Working | 2026-02-26 | `/dev/dma_heap/dma32` — all allocations guaranteed below 4 GB |
+| 25 | Full 7.5 GB RAM visible | ✅ Working | 2026-02-26 | No `mem=3584M` needed, no CMA needed |
 
 ---
 
@@ -61,9 +60,8 @@
 |---|--------|--------|---------|
 | 27 | `/dev/rknpu` | ✅ Present | Misc device — RKNN API job submission (direct alloc + DMA-BUF import) |
 | 28 | `/dev/dri/renderD129` | ✅ Present | DRM render node — GEM buffer allocation and sharing |
-| 29 | `/dev/dma_heap/system` | ✅ Symlink → `linux,cma` | RKNN runtime buffer allocation (below 4 GB) |
-| 30 | `/dev/dma_heap/dma32` | ✅ Present | Backup DMA heap below 4 GB |
-| 31 | `/dev/dma_heap/linux,cma` | ✅ Present | CMA heap (3 GB, alloc-ranges <4 GB) |
+| 29 | `/dev/dma_heap/system` | ✅ Symlink → `dma32` | RKNN runtime buffer allocation (below 4 GB via dma32_heap) |
+| 30 | `/dev/dma_heap/dma32` | ✅ Present | Primary DMA heap — all allocations below 4 GB |
 
 ---
 
@@ -131,7 +129,7 @@
 | # | Limitation | Impact | Workaround |
 |---|------------|--------|------------|
 | 61 | ~~Max 600 MHz without SCMI~~ | **FIXED** — SCMI now in repo overlay | 1000 MHz verified, 25.1 FPS YOLOv5s |
-| 62 | CMA 3 GB | ~4.5 GB free for general use (CMA is reusable but may fragment) | None — required for NPU DMA <4 GB |
+| 62 | ~~CMA 3 GB~~ | **REMOVED** — replaced by dma32_heap | No custom DTB needed, no CMA reservation, full RAM available |
 | 63 | RKNN library hardcodes `system` heap | Requires udev symlink workaround | Udev rule installed by `install.sh` |
 | 64 | ~~No SRAM acceleration~~ | **FIXED** — 44 KB SRAM split in overlay | `RKNPU_SRAM_PERCENT`: 0=all video, 33/50/66=split, 100=all NPU |
 | 65 | `regulator-always-on` on vdd_npu | Modest extra power draw when NPU idle | None — required to prevent PD6 crash |
@@ -148,11 +146,10 @@
 ## Boot Configuration (Repo Default)
 
 ```
-fdtfile=rockchip/rk3568-odroid-m1-npu.dtb
 user_overlays=rknpu
 ```
 
-No `extraargs`, no `mem=3584M`. Full 7.5 GB RAM visible.
+No `fdtfile` override (stock Armbian DTB), no `extraargs`, no `mem=3584M`. Full 7.5 GB RAM visible. No CMA reservation.
 
 ---
 
@@ -162,7 +159,7 @@ No `extraargs`, no `mem=3584M`. Full 7.5 GB RAM visible.
 |------|---------|
 | `/etc/modules-load.d/rknpu.conf` | Autoload rknpu module at boot |
 | `/etc/modules-load.d/dma32-heap.conf` | Autoload dma32_heap module at boot |
-| `/etc/udev/rules.d/99-dma-heap-cma.rules` | Symlink `/dev/dma_heap/system` → `linux,cma` |
+| `/etc/udev/rules.d/99-dma-heap-dma32.rules` | Symlink `/dev/dma_heap/system` → `dma32` |
 | `/boot/overlay-user/rknpu.dtbo` | DT overlay: PD6, vdd_npu, power-domains, rknpu-supply |
 
 ---
@@ -172,12 +169,17 @@ No `extraargs`, no `mem=3584M`. Full 7.5 GB RAM visible.
 | Date | Milestone |
 |------|-----------|
 | 2026-01-30 | First working NPU: DRM, IOMMU, PD6, clocks 600 MHz, `mem=3584M` |
-| 2026-01-31 | 8 GB RAM fix: `RKNPU_GEM_ALLOC_FROM_PAGES=0`, CMA 3 GB, no `mem=` limit |
+| 2026-01-31 | 8 GB RAM fix: `RKNPU_GEM_ALLOC_FROM_PAGES=0`, no `mem=` limit |
 | 2026-02-07 | Kernel 6.18.8: API compat fixes (hrtimer, pfn_t, MODULE_IMPORT_NS) |
 | 2026-02-07 | SCMI DVFS: full 200–900 MHz range via ARM SCMI clock |
 | 2026-02-09 | Full feature set: /dev/rknpu, devfreq, SCMI 1 GHz, SRAM 12 KB, debugfs |
 | 2026-02-12 | `state_init = rk3576_state_init` fix — resolves all job timeouts |
-| 2026-02-12 | 3-layer 8 GB fix: kernel IOMMU patch + GEM __GFP_DMA + CMA symlink |
+| 2026-02-12 | 2-layer 8 GB fix: kernel IOMMU patch + GEM __GFP_DMA + dma32 heap |
 | 2026-02-26 | GitHub repo created with full DKMS source, install.sh, overlay, dma32-heap |
 | 2026-02-26 | Direct alloc on /dev/rknpu (removed import-only limitation) |
 | 2026-02-26 | SCMI clock + OPP 1 GHz wired into repo overlay — full DVFS 200–1000 MHz |
+| 2026-02-27 | CMA 3 GB removed — replaced by dma32_heap with vmap support. No custom DTB CMA node needed. |
+| 2026-02-27 | 8 GB RAM fix reduced from 3 layers to 2 layers (kernel IOMMU patch + dma32 udev symlink) |
+| 2026-02-27 | SCMI-only clocking — removed CRU hybrid, all freqs via ARM SCMI (198–1000 MHz) |
+| 2026-02-27 | Removed 6 debug module params (bypass_irq/reset, gem_addr_log, force_kernel_mapping, fake_dev) |
+| 2026-02-27 | Devfreq service simplified — minimal oneshot replaces complex sleep-loop service |

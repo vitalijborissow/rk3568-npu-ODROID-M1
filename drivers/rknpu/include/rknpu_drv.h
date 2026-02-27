@@ -148,8 +148,6 @@ struct rknpu_device {
 	struct rockchip_opp_info opp_info;
 	unsigned long current_freq;
 	unsigned long current_volt;
-	int bypass_irq_handler;
-	int bypass_soft_reset;
 	bool soft_reseting;
 	struct device *genpd_dev_npu0;
 	struct device *genpd_dev_npu1;

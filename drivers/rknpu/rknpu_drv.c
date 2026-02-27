@@ -82,15 +82,6 @@ static inline int rockchip_nvmem_cell_read_u8(struct device_node *np, const char
 #define NPU_MMU_DISABLED_POLL_PERIOD_US 1000
 #define NPU_MMU_DISABLED_POLL_TIMEOUT_US 20000
 
-static int bypass_irq_handler;
-module_param(bypass_irq_handler, int, 0644);
-MODULE_PARM_DESC(bypass_irq_handler,
-		 "bypass RKNPU irq handler if set it to 1, disabled by default");
-
-static int bypass_soft_reset;
-module_param(bypass_soft_reset, int, 0644);
-MODULE_PARM_DESC(bypass_soft_reset,
-		 "bypass RKNPU soft reset if set it to 1, disabled by default");
 
 static const struct rknpu_irqs_data rknpu_irqs[] = {
 	{ "npu_irq", rknpu_core0_irq_handler }
@@ -1384,9 +1375,6 @@ static int rknpu_probe(struct platform_device *pdev)
 		}
 	}
 
-	rknpu_dev->bypass_irq_handler = bypass_irq_handler;
-	rknpu_dev->bypass_soft_reset = bypass_soft_reset;
-
 	rknpu_reset_get(rknpu_dev);
 
 	rknpu_dev->num_clks = devm_clk_bulk_get_all(dev, &rknpu_dev->clks);
@@ -1478,13 +1466,9 @@ static int rknpu_probe(struct platform_device *pdev)
 		}
 	}
 
-	if (!rknpu_dev->bypass_irq_handler) {
-		ret = rknpu_register_irq(pdev, rknpu_dev);
-		if (ret)
-			return ret;
-	} else {
-		LOG_DEV_WARN(dev, "bypass irq handler!\n");
-	}
+	ret = rknpu_register_irq(pdev, rknpu_dev);
+	if (ret)
+		return ret;
 
 #ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
 	ret = rknpu_drm_probe(rknpu_dev);

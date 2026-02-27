@@ -10,6 +10,8 @@
 #include <linux/module.h>
 #include <linux/scatterlist.h>
 #include <linux/slab.h>
+#include <linux/vmalloc.h>
+#include <linux/iosys-map.h>
 
 #define LOW_ORDER_GFP (GFP_KERNEL | __GFP_ZERO | __GFP_DMA32)
 #define HIGH_ORDER_GFP (GFP_KERNEL | __GFP_ZERO | __GFP_DMA32 | __GFP_COMP | __GFP_NOWARN | __GFP_NORETRY)
@@ -161,6 +163,76 @@ static int dma32_heap_mmap(struct dma_buf *dmabuf, struct vm_area_struct *vma)
     return 0;
 }
 
+static int dma32_heap_vmap(struct dma_buf *dmabuf, struct iosys_map *map)
+{
+    struct dma32_heap_buffer *buffer = dmabuf->priv;
+    struct sg_table *table = &buffer->sg_table;
+    unsigned int npages = PAGE_ALIGN(buffer->len) >> PAGE_SHIFT;
+    struct page **pages;
+    struct page **tmp;
+    struct scatterlist *sg;
+    pgprot_t pgprot = PAGE_KERNEL;
+    void *vaddr;
+    int i;
+
+    mutex_lock(&buffer->lock);
+    if (buffer->vmap_cnt) {
+        buffer->vmap_cnt++;
+        iosys_map_set_vaddr(map, buffer->vaddr);
+        mutex_unlock(&buffer->lock);
+        return 0;
+    }
+
+    pages = kvmalloc_array(npages, sizeof(*pages), GFP_KERNEL);
+    if (!pages) {
+        mutex_unlock(&buffer->lock);
+        return -ENOMEM;
+    }
+
+    tmp = pages;
+    for_each_sgtable_sg(table, sg, i) {
+        unsigned int npages_this = sg->length >> PAGE_SHIFT;
+        struct page *page = sg_page(sg);
+        unsigned int j;
+
+        for (j = 0; j < npages_this; j++)
+            *(tmp++) = page++;
+    }
+
+    vaddr = vmap(pages, npages, VM_MAP, pgprot);
+    kvfree(pages);
+
+    if (!vaddr) {
+        mutex_unlock(&buffer->lock);
+        return -ENOMEM;
+    }
+
+    buffer->vaddr = vaddr;
+    buffer->vmap_cnt++;
+    iosys_map_set_vaddr(map, vaddr);
+    mutex_unlock(&buffer->lock);
+
+    return 0;
+}
+
+static void dma32_heap_vunmap(struct dma_buf *dmabuf, struct iosys_map *map)
+{
+    struct dma32_heap_buffer *buffer = dmabuf->priv;
+
+    mutex_lock(&buffer->lock);
+    if (WARN_ON(buffer->vmap_cnt == 0)) {
+        mutex_unlock(&buffer->lock);
+        return;
+    }
+
+    buffer->vmap_cnt--;
+    if (buffer->vmap_cnt == 0) {
+        vunmap(buffer->vaddr);
+        buffer->vaddr = NULL;
+    }
+    mutex_unlock(&buffer->lock);
+}
+
 static const struct dma_buf_ops dma32_heap_buf_ops = {
     .attach = dma32_heap_attach,
     .detach = dma32_heap_detach,
@@ -168,6 +240,8 @@ static const struct dma_buf_ops dma32_heap_buf_ops = {
     .unmap_dma_buf = dma32_heap_unmap_dma_buf,
     .release = dma32_heap_dma_buf_release,
     .mmap = dma32_heap_mmap,
+    .vmap = dma32_heap_vmap,
+    .vunmap = dma32_heap_vunmap,
 };
 
 static struct page *alloc_largest_available_dma32(unsigned long size, unsigned int max_order)

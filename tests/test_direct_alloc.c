@@ -6,7 +6,7 @@
  *
  * Tests both MEM_CREATE paths:
  *   handle=0  → direct allocation (dma_alloc_coherent + dma_buf_export)
- *   handle>0  → DMA-BUF import (from /dev/dma_heap/linux,cma)
+ *   handle>0  → DMA-BUF import (from /dev/dma_heap/dma32)
  */
 #include <errno.h>
 #include <fcntl.h>
@@ -65,7 +65,7 @@ int main() {
     }
 
     /* Test 2: Import (handle>0, use a DMA heap fd) */
-    int heap_fd = open("/dev/dma_heap/linux,cma", O_RDWR);
+    int heap_fd = open("/dev/dma_heap/dma32", O_RDWR);
     if (heap_fd >= 0) {
         struct { uint64_t len; uint32_t fd; uint32_t fd_flags; uint64_t heap_flags; } alloc = {0};
         alloc.len = 1024 * 1024;

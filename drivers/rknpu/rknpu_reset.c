@@ -102,11 +102,6 @@ int rknpu_soft_reset(struct rknpu_device *rknpu_dev)
 	struct rknpu_subcore_data *subcore_data = NULL;
 	int ret = 0, i = 0;
 
-	if (rknpu_dev->bypass_soft_reset) {
-		LOG_WARN("bypass soft reset\n");
-		return 0;
-	}
-
 	/* Skip mutex during init - just proceed with reset */
 	
 	if (!rknpu_dev->config) {

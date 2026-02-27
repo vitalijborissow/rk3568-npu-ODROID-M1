@@ -49,35 +49,6 @@ MODULE_PARM_DESC(
 	"DKMS: force contiguous DMA allocations (ignore RKNPU_MEM_NON_CONTIGUOUS)"
 );
 
-static bool dkms_gem_addr_log;
-module_param(dkms_gem_addr_log, bool, 0644);
-MODULE_PARM_DESC(
-	dkms_gem_addr_log,
-	"DKMS: log GEM address details (dma_addr, sg_phys, iommu_iova_to_phys) on GEM_CREATE"
-);
-
-static uint dkms_gem_addr_log_limit = 64;
-module_param(dkms_gem_addr_log_limit, uint, 0644);
-MODULE_PARM_DESC(
-	dkms_gem_addr_log_limit,
-	"DKMS: max number of GEM_CREATE address detail logs"
-);
-
-static atomic_t dkms_gem_addr_log_count = ATOMIC_INIT(0);
-
-static bool dkms_force_kernel_mapping;
-module_param(dkms_force_kernel_mapping, bool, 0644);
-MODULE_PARM_DESC(
-	dkms_force_kernel_mapping,
-	"DKMS: force kernel mapping for GEM allocations (enables CPU access for debug/patching)"
-);
-
-static bool dkms_alloc_use_fake_dev;
-module_param(dkms_alloc_use_fake_dev, bool, 0644);
-MODULE_PARM_DESC(
-	dkms_alloc_use_fake_dev,
-	"DKMS: allocate GEM buffers using fake_dev (bypass IOMMU DMA ops, test physical/bus addressing)"
-);
 #endif
 
 #ifdef RKNPU_DKMS
@@ -315,12 +286,6 @@ static int rknpu_gem_alloc_buf(struct rknpu_gem_object *rknpu_obj)
 #ifdef RKNPU_DKMS
 	if (dkms_force_contig_alloc)
 		rknpu_obj->flags &= ~RKNPU_MEM_NON_CONTIGUOUS;
-	if (dkms_force_kernel_mapping)
-		rknpu_obj->flags |= RKNPU_MEM_KERNEL_MAPPING;
-	if (dkms_alloc_use_fake_dev && rknpu_dev->fake_dev) {
-		alloc_dev = rknpu_dev->fake_dev;
-		LOG_ERROR("DKMS: GEM alloc using fake_dev for dma_alloc_attrs\n");
-	}
 #endif
 
 	/*
@@ -490,8 +455,6 @@ static void rknpu_gem_free_buf(struct rknpu_gem_object *rknpu_obj)
 	kfree(rknpu_obj->sgt);
 
 #ifdef RKNPU_DKMS
-	if (dkms_alloc_use_fake_dev && rknpu_dev && rknpu_dev->fake_dev)
-		free_dev = rknpu_dev->fake_dev;
 	dma_free_attrs(free_dev, rknpu_obj->size, rknpu_obj->cookie,
 		       rknpu_obj->dma_addr, rknpu_obj->dma_attrs);
 #else
@@ -1110,39 +1073,6 @@ int rknpu_gem_create_ioctl(struct drm_device *drm, void *data,
 		(unsigned long long)rknpu_obj->iova_start,
 		(unsigned long)rknpu_obj->iova_size,
 		rknpu_obj->iommu_domain_id, rknpu_obj->core_mask);
-
-	if (dkms_gem_addr_log &&
-	    atomic_inc_return(&dkms_gem_addr_log_count) <=
-		    (int)dkms_gem_addr_log_limit) {
-		struct rknpu_device *rknpu_dev = drm->dev_private;
-		struct iommu_domain *domain = NULL;
-		phys_addr_t phys_from_dma = 0;
-		phys_addr_t first_sg_phys = 0;
-		dma_addr_t first_sg_dma = 0;
-		unsigned int nents = 0;
-
-		if (rknpu_dev && rknpu_dev->iommu_en)
-			domain = iommu_get_domain_for_dev(rknpu_dev->dev);
-		if (domain)
-			phys_from_dma = iommu_iova_to_phys(domain, rknpu_obj->dma_addr);
-		if (rknpu_obj->sgt && rknpu_obj->sgt->sgl) {
-			first_sg_phys = sg_phys(rknpu_obj->sgt->sgl);
-			first_sg_dma = sg_dma_address(rknpu_obj->sgt->sgl);
-			nents = rknpu_obj->sgt->nents;
-		}
-
-		LOG_ERROR(
-			"DKMS: GEM_CREATE_ADDR handle=%u iommu_en=%d dma_addr=%#llx dma->phys=%#llx sgt_nents=%u sgt_sg0_phys=%#llx sgt_sg0_dma=%#llx iova_start=%#llx iova_size=%#lx\n",
-			args->handle,
-			rknpu_dev ? (int)rknpu_dev->iommu_en : -1,
-			(unsigned long long)rknpu_obj->dma_addr,
-			(unsigned long long)phys_from_dma,
-			nents,
-			(unsigned long long)first_sg_phys,
-			(unsigned long long)first_sg_dma,
-			(unsigned long long)rknpu_obj->iova_start,
-			(unsigned long)rknpu_obj->iova_size);
-	}
 
 	rknpu_dkms_track_gem_obj(rknpu_obj);
 #endif

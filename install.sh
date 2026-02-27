@@ -148,29 +148,33 @@ EOF
 echo "  Module autoload configured (rknpu + dma32_heap + devfreq governors)."
 
 echo "[5/6] Installing udev rules..."
-cat > /etc/udev/rules.d/99-dma-heap-cma.rules << 'EOF'
-ACTION=="add", SUBSYSTEM=="dma_heap", KERNEL=="linux,cma", RUN+="/bin/sh -c 'rm -f /dev/dma_heap/system && ln -s /dev/dma_heap/linux,cma /dev/dma_heap/system'"
+rm -f /etc/udev/rules.d/99-dma-heap-cma.rules
+cat > /etc/udev/rules.d/99-dma-heap-dma32.rules << 'EOF'
+ACTION=="add", SUBSYSTEM=="dma_heap", KERNEL=="dma32", RUN+="/bin/sh -c 'rm -f /dev/dma_heap/system && ln -s /dev/dma_heap/dma32 /dev/dma_heap/system'"
 EOF
-# Unlock devfreq to full OPP range (200-1000 MHz) after boot
-rm -f /etc/modprobe.d/rknpu-devfreq.conf
+echo "  Udev rules installed (DMA heap → dma32)."
+
+# Unlock devfreq to full OPP range (200-1000 MHz)
 rm -f /etc/udev/rules.d/99-rknpu-devfreq.rules
+rm -f /etc/modprobe.d/rknpu-devfreq.conf
 cat > /etc/systemd/system/rknpu-devfreq.service << 'EOF'
 [Unit]
-Description=Unlock NPU devfreq to full OPP range
+Description=Unlock NPU devfreq OPP range
+ConditionPathExists=/sys/class/devfreq/fde40000.npu/min_freq
 After=multi-user.target
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/sh -c 'F=/sys/class/devfreq/fde40000.npu; test -f $F/min_freq && echo 200000000 > $F/min_freq && echo 1000000000 > $F/max_freq || true'
-ExecStartPost=/bin/sh -c 'sleep 10; F=/sys/class/devfreq/fde40000.npu; echo 200000000 > $F/min_freq 2>/dev/null; echo 1000000000 > $F/max_freq 2>/dev/null; sleep 10; echo 200000000 > $F/min_freq 2>/dev/null; echo 1000000000 > $F/max_freq 2>/dev/null; echo "rknpu-devfreq: final min=$(cat $F/min_freq) max=$(cat $F/max_freq)" > /dev/kmsg'
+ExecStartPre=/bin/sleep 5
+ExecStart=/bin/sh -c 'echo 200000000 > /sys/class/devfreq/fde40000.npu/min_freq; echo 1000000000 > /sys/class/devfreq/fde40000.npu/max_freq'
 
 [Install]
 WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
 systemctl enable rknpu-devfreq.service 2>/dev/null
-echo "  Udev rules installed (DMA heap) + systemd devfreq service."
+echo "  Devfreq unlock service installed (200-1000 MHz)."
 
 echo "[6/6] Removing any stale blacklists..."
 rm -f /etc/modprobe.d/blacklist-rknpu.conf
@@ -182,7 +186,7 @@ echo "=== Installation complete ==="
 echo ""
 echo "Next steps:"
 echo "  1. Edit /boot/armbianEnv.txt and set:"
-echo "     fdtfile=rockchip/rk3568-odroid-m1-npu.dtb"
 echo "     user_overlays=rknpu"
+echo "     (No custom fdtfile needed — stock Armbian DTB works)"
 echo "  2. Reboot"
 echo "  3. Verify: lsmod | grep rknpu && ls /dev/rknpu /dev/dri/renderD129"
