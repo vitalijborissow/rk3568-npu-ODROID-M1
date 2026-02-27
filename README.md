@@ -44,7 +44,7 @@ Reboot.
 lsmod | grep rknpu           # rknpu module loaded
 ls /dev/rknpu                # misc device
 ls /dev/dri/renderD129       # DRM render node
-ls -la /dev/dma_heap/system  # symlink -> linux,cma
+ls -la /dev/dma_heap/system  # symlink -> dma32
 dmesg | grep RKNPU           # probe ok, no errors
 ```
 
@@ -79,8 +79,8 @@ Without this overlay the NPU power domain stays off and the driver crashes on MM
 | Debugfs / Procfs | ✅ |
 | Fence sync | ✅ |
 | 8 GB RAM (full, no mem= limit) | ✅ |
-| SCMI clock (>600 MHz) | ❌ requires additional overlay |
-| SRAM acceleration | ❌ not wired in ODROID-M1 DTB |
+| SCMI clock (200–1000 MHz) | ✅ |
+| SRAM acceleration (44 KB) | ✅ |
 
 ## Tested With
 
@@ -88,7 +88,7 @@ Without this overlay the NPU power domain stays off and the driver crashes on MM
 - **Kernel:** 6.18.9-current-rockchip64 (Armbian)
 - **RKNN SDK:** 2.4.0
 - **Driver version:** 0.9.8
-- **Inference:** YOLOv5 ~56 ms, YOLO11n working
+- **Inference:** YOLOv5s 42.4 ms avg @ 1000 MHz, YOLO11n working
 
 ## License
 

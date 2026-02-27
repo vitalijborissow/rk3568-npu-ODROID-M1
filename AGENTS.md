@@ -126,8 +126,8 @@ The RK3568 NPU can only DMA to addresses below 4 GB. This is handled in two laye
 | Model | Frequency | Latency | FPS |
 |-------|-----------|---------|-----|
 | YOLOv5s 640×640 (C API) | 600 MHz | 49.1 ms | 20.4 |
-| YOLOv5s 640×640 (C API) | 1000 MHz | 43.6 ms | 22.9 |
-| YOLOv5s 640×640 (C API, devfreq auto) | auto | 43.8 ms | 22.8 |
+| YOLOv5s 640×640 (C API) | 1000 MHz | 42.4 ms | 23.6 |
+| YOLOv5s 640×640 (C API, devfreq auto) | auto | 42.4 ms | 23.6 |
 | YOLOv5s 640×640 (Python) | 600 MHz | 96.3 ms | 10.4 |
 | YOLO11n | 600 MHz | ~4.1 ms | ~241 |
 | YOLO11n | 1000 MHz | ~3.1 ms | ~321 |
@@ -155,11 +155,8 @@ C API measures `rknn_run()` only. Python includes ~47 ms rknnlite overhead. The 
 - Remove kernel compatibility blocks for kernels older than 6.1 (`#if KERNEL_VERSION` guards for 4.x/5.x)
 - Remove `FPGA_PLATFORM` guards in `rknpu_drv.c` and `rknpu_reset.c`
 - Remove `CONFIG_NO_GKI` guards — DKMS on Armbian is always non-GKI
-- Remove duplicate `#include "rknpu_gem.h"` in `rknpu_drv.c`
-- Remove unused Rockchip vendor headers from `include/rknpu_drv.h`
 
 ### Performance
-- Remove unnecessary `power_get`/`power_put` from `rknpu_gem_free_object` — GEM object teardown does not require NPU power
 - Use `kmem_cache` for `rknpu_job` allocation instead of `kzalloc` per submit
 - Replace the linear list scan in `rknpu_dkms_find_gem_obj_by_addr` with a hash table
 

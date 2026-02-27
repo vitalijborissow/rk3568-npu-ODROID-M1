@@ -85,6 +85,7 @@
 | # | Parameter | Default | Description |
 |---|-----------|---------|-------------|
 | 41 | `dkms_force_contig_alloc` | `Y` | Force contiguous DMA allocations (ignore `RKNPU_MEM_NON_CONTIGUOUS`) |
+| 42 | `power_put_delay_ms` | `500` | Delay in ms before powering off NPU after last job (0 = immediate) |
 
 ---
 
@@ -93,8 +94,8 @@
 | # | Model | Frequency | Avg Latency | FPS |
 |---|-------|-----------|-------------|-----|
 | 48 | YOLOv5s 640×640 (C API) | 600 MHz | 49.1 ms | 20.4 |
-| 49 | YOLOv5s 640×640 (C API) | 1000 MHz | 43.6 ms | 22.9 |
-| 50 | YOLOv5s 640×640 (C API, devfreq) | auto | 43.8 ms | 22.8 |
+| 49 | YOLOv5s 640×640 (C API) | 1000 MHz | 42.4 ms | 23.6 |
+| 50 | YOLOv5s 640×640 (C API, devfreq) | auto | 42.4 ms | 23.6 |
 | 51 | YOLOv5s 640×640 (Python) | 600 MHz | 96.3 ms | 10.4 |
 | 52 | YOLO11n | 600 MHz | ~4.1 ms | ~241 |
 | 53 | YOLO11n | 1000 MHz | ~3.1 ms | ~321 |
@@ -137,7 +138,7 @@
 user_overlays=rknpu
 ```
 
-No `fdtfile` override (stock Armbian DTB), no `extraargs`, no `mem=3584M`. Full 7.5 GB RAM visible. No CMA reservation.
+`fdtfile=rockchip/rk3568-odroid-m1-npu.dtb` + `user_overlays=rknpu`. No `extraargs`, no `mem=3584M`. Full 7.5 GB RAM visible. No CMA reservation.
 
 ---
 
