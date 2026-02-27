@@ -56,7 +56,6 @@
 #include <drm/drm_ioctl.h>
 #include <drm/drm_file.h>
 #include <drm/drm_drv.h>
-#include "rknpu_gem.h"
 #endif
 
 #ifdef CONFIG_ROCKCHIP_RKNPU_DMA_HEAP
@@ -81,6 +80,11 @@ static inline int rockchip_nvmem_cell_read_u8(struct device_node *np, const char
 #define POWER_DOWN_FREQ 200000000
 #define NPU_MMU_DISABLED_POLL_PERIOD_US 1000
 #define NPU_MMU_DISABLED_POLL_TIMEOUT_US 20000
+
+static unsigned int power_put_delay_ms = 500;
+module_param(power_put_delay_ms, uint, 0644);
+MODULE_PARM_DESC(power_put_delay_ms,
+	"Delay in ms before powering off the NPU after last job (0=immediate, default=500)");
 
 
 static const struct rknpu_irqs_data rknpu_irqs[] = {
@@ -957,48 +961,11 @@ static int rknpu_power_on(struct rknpu_device *rknpu_dev)
 	struct device *dev = rknpu_dev->dev;
 	int ret = -EINVAL;
 
-#ifndef FPGA_PLATFORM
-	/* VDD regulator handling disabled - PMIC manages vdd_npu */
-//DISABLED: 	if (rknpu_dev->vdd) {
-//DISABLED: 		ret = regulator_enable(rknpu_dev->vdd);
-//DISABLED: 		if (ret) {
-//DISABLED: 			LOG_DEV_ERROR(
-//DISABLED: 				dev,
-//DISABLED: 				"failed to enable vdd reg for rknpu, ret: %d\n",
-//DISABLED: 				ret);
-//DISABLED: 			return ret;
-//DISABLED: 		}
-//DISABLED: 	}
-
-	/* MEM regulator handling disabled - PMIC manages it */
-//DISABLED: 	if (rknpu_dev->mem) {
-//DISABLED: 		ret = regulator_enable(rknpu_dev->mem);
-//DISABLED: 		if (ret) {
-//DISABLED: 			LOG_DEV_ERROR(
-//DISABLED: 				dev,
-//DISABLED: 				"failed to enable mem reg for rknpu, ret: %d\n",
-//DISABLED: 				ret);
-//DISABLED: 			return ret;
-//DISABLED: 		}
-//DISABLED: 	}
-#endif
-
 	ret = clk_bulk_prepare_enable(rknpu_dev->num_clks, rknpu_dev->clks);
 	if (ret) {
 		LOG_DEV_ERROR(dev, "failed to enable clk for rknpu, ret: %d\n",
 			      ret);
 		return ret;
-	}
-
-	{
-		int i;
-		dev_dbg(dev, "RKNPU POWER_ON: clocks enabled (%d clks)\n", rknpu_dev->num_clks);
-		for (i = 0; i < rknpu_dev->num_clks && i < 4; i++) {
-			if (rknpu_dev->clks[i].clk) {
-				dev_dbg(dev, "RKNPU POWER_ON: clk[%d] rate=%lu Hz\n",
-					i, clk_get_rate(rknpu_dev->clks[i].clk));
-			}
-		}
 	}
 
 #ifndef FPGA_PLATFORM
@@ -1120,20 +1087,6 @@ static int rknpu_power_off(struct rknpu_device *rknpu_dev)
 #endif
 
 	clk_bulk_disable_unprepare(rknpu_dev->num_clks, rknpu_dev->clks);
-
-#ifndef FPGA_PLATFORM
-	/* PMIC manages regulators - power_off regulator calls removed */
-//DISABLED: 	LOG_INFO("DEBUG power_off: vdd=%px mem=%px\n", rknpu_dev->vdd, rknpu_dev->mem);
-//DISABLED: 	if (rknpu_dev->vdd && !IS_ERR(rknpu_dev->vdd)) {
-//DISABLED: 		LOG_INFO("DEBUG: calling regulator_disable(vdd=%px)\n", rknpu_dev->vdd);
-//DISABLED: 		regulator_disable(rknpu_dev->vdd);
-//DISABLED: 	}
-//DISABLED: 
-//DISABLED: 	if (rknpu_dev->mem && !IS_ERR(rknpu_dev->mem)) {
-//DISABLED: 		LOG_INFO("DEBUG: calling regulator_disable(mem=%px)\n", rknpu_dev->mem);
-//DISABLED: 		regulator_disable(rknpu_dev->mem);
-//DISABLED: 	}
-#endif
 
 	return 0;
 }
@@ -1563,8 +1516,7 @@ static int rknpu_probe(struct platform_device *pdev)
 	rknpu_devfreq_init(rknpu_dev);
 #endif
 
-	// set default power put delay to 3s
-	rknpu_dev->power_put_delay = 0;
+	rknpu_dev->power_put_delay = power_put_delay_ms;
 	rknpu_dev->power_off_wq =
 		create_freezable_workqueue("rknpu_power_off_wq");
 	if (!rknpu_dev->power_off_wq) {

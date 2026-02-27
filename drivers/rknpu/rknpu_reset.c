@@ -111,7 +111,7 @@ int rknpu_soft_reset(struct rknpu_device *rknpu_dev)
 
 	rknpu_dev->soft_reseting = true;
 
-	msleep(100);
+	msleep(10);
 
 	for (i = 0; i < rknpu_dev->config->num_irqs; ++i) {
 		subcore_data = &rknpu_dev->subcore_datas[i];

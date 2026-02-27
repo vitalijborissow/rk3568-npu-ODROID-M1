@@ -158,8 +158,8 @@ echo "  Udev rules installed (DMA heap → dma32)."
 rm -f /etc/udev/rules.d/99-rknpu-devfreq.rules
 rm -f /etc/modprobe.d/rknpu-devfreq.conf
 for svc in rknpu-devfreq npu-performance; do
-    systemctl disable "$svc.service" 2>/dev/null
-    systemctl stop "$svc.service" 2>/dev/null
+    systemctl disable "$svc.service" 2>/dev/null || true
+    systemctl stop "$svc.service" 2>/dev/null || true
     rm -f "/etc/systemd/system/$svc.service"
 done
 systemctl daemon-reload

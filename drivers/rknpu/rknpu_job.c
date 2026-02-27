@@ -369,12 +369,6 @@ static inline int rknpu_job_subcore_commit_pc(struct rknpu_job *job,
 	task_end = task_start + task_number - 1;
 
 	task_base = task_kv_addr;
-	if (!task_base) {
-		LOG_ERROR("task_kv_addr is NULL!\n");
-		job->ret = -EINVAL;
-		return job->ret;
-	}
-
 	first_task = &task_base[task_start];
 	last_task = &task_base[task_end];
 
@@ -614,7 +608,7 @@ static void rknpu_job_abort(struct rknpu_job *job)
 
 	rknpu_iommu_domain_put(rknpu_dev);
 
-	msleep(100);
+	msleep(10);
 
 	spin_lock_irqsave(&rknpu_dev->irq_lock, flags);
 	for (i = 0; i < rknpu_dev->config->num_irqs; i++) {

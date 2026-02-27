@@ -528,6 +528,12 @@ int rknpu_iommu_domain_get_and_switch(struct rknpu_device *rknpu_dev,
 	unsigned long start = jiffies;
 	int ret = -EINVAL;
 
+	/* Fast path: single domain, no switching possible */
+	if (rknpu_dev->iommu_domain_num <= 1) {
+		atomic_inc(&rknpu_dev->iommu_domain_refcount);
+		return 0;
+	}
+
 	while (true) {
 		mutex_lock(&rknpu_dev->domain_lock);
 
