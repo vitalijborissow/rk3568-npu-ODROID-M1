@@ -139,13 +139,38 @@ echo "  rknpu.dtbo installed to /boot/overlay-user/"
 echo "[4/6] Configuring module autoload..."
 echo "rknpu" > /etc/modules-load.d/rknpu.conf
 echo "dma32_heap" > /etc/modules-load.d/dma32-heap.conf
-echo "  Module autoload configured."
+# Load all devfreq governors so performance/powersave/userspace are available
+cat > /etc/modules-load.d/devfreq-governors.conf << 'EOF'
+governor_performance
+governor_powersave
+governor_userspace
+EOF
+echo "  Module autoload configured (rknpu + dma32_heap + devfreq governors)."
 
-echo "[5/6] Installing udev rule (DMA heap CMA redirect)..."
+echo "[5/6] Installing udev rules..."
 cat > /etc/udev/rules.d/99-dma-heap-cma.rules << 'EOF'
 ACTION=="add", SUBSYSTEM=="dma_heap", KERNEL=="linux,cma", RUN+="/bin/sh -c 'rm -f /dev/dma_heap/system && ln -s /dev/dma_heap/linux,cma /dev/dma_heap/system'"
 EOF
-echo "  Udev rule installed."
+# Unlock devfreq to full OPP range (200-1000 MHz) after boot
+rm -f /etc/modprobe.d/rknpu-devfreq.conf
+rm -f /etc/udev/rules.d/99-rknpu-devfreq.rules
+cat > /etc/systemd/system/rknpu-devfreq.service << 'EOF'
+[Unit]
+Description=Unlock NPU devfreq to full OPP range
+After=multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'F=/sys/class/devfreq/fde40000.npu; test -f $F/min_freq && echo 200000000 > $F/min_freq && echo 1000000000 > $F/max_freq || true'
+ExecStartPost=/bin/sh -c 'sleep 10; F=/sys/class/devfreq/fde40000.npu; echo 200000000 > $F/min_freq 2>/dev/null; echo 1000000000 > $F/max_freq 2>/dev/null; sleep 10; echo 200000000 > $F/min_freq 2>/dev/null; echo 1000000000 > $F/max_freq 2>/dev/null; echo "rknpu-devfreq: final min=$(cat $F/min_freq) max=$(cat $F/max_freq)" > /dev/kmsg'
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+systemctl enable rknpu-devfreq.service 2>/dev/null
+echo "  Udev rules installed (DMA heap) + systemd devfreq service."
 
 echo "[6/6] Removing any stale blacklists..."
 rm -f /etc/modprobe.d/blacklist-rknpu.conf

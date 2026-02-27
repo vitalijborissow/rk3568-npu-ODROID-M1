@@ -18,7 +18,7 @@
 | 4 | Fence sync | `-DCONFIG_ROCKCHIP_RKNPU_FENCE` | ✅ | ✅ Working | DRM syncobj/sync_file support |
 | 5 | Procfs `/proc/rknpu/` | `-DCONFIG_ROCKCHIP_RKNPU_PROC_FS` | ✅ | ✅ Working | 8 entries: version, freq, load, power, volt, mm, reset, delayms |
 | 6 | Debugfs `/sys/kernel/debug/rknpu/` | `-DCONFIG_ROCKCHIP_RKNPU_DEBUG_FS` | ✅ | ✅ Working | 14 entries incl. clock_source, opp_bypass, freq_hz, voltage_mv |
-| 7 | Devfreq (DVFS) | `-DCONFIG_PM_DEVFREQ` | ✅ | ✅ Working | simple_ondemand governor, hybrid CRU (≤600 MHz) + SCMI (700–1000 MHz) |
+| 7 | Devfreq (DVFS) | `-DCONFIG_PM_DEVFREQ` | ✅ | ✅ Working | 4 governors: simple_ondemand (default), performance, powersave, userspace. Hybrid CRU (≤600 MHz) + SCMI (700–1000 MHz). Full OPP range 200–1000 MHz unlocked at boot via systemd service. |
 | 8 | SRAM support | `RKNPU_SRAM_PERCENT=100` | ✅ | ✅ Working | 44 KB shared with rkvdec. 0=all video, 50=split, 100=all NPU (default) |
 
 ---
@@ -139,7 +139,7 @@
 | 67 | IOMMU GFP_DMA32 patch in kernel | Not in stock Armbian; custom kernel needed for 8 GB | Use Armbian 6.18.9 build that includes this patch |
 | 68 | ~~Thermal zone not attached~~ | **FIXED** — dual-zone binding + governor support | Bound to cpu-thermal + gpu-thermal. All 4 compiled governors verified. |
 | 69 | DRM path ~50% slower than misc device | Use `/dev/rknpu` for best performance | Both paths available; misc device supports direct alloc since 2026-02-26 |
-| 70 | `simple_ondemand` governor idles at low freq | Poor perf if not explicitly set to `performance` | `echo performance > /sys/class/devfreq/fde40000.npu/governor` |
+| 70 | ~~Only simple_ondemand governor~~ | **FIXED** — all 4 devfreq governors loaded at boot | governor_performance, governor_powersave, governor_userspace modules auto-loaded |
 | 71 | CRU freq accuracy | CRU gives approximate values (99/198/297 vs 100/200/300 MHz) | Cosmetic only |
 | 72 | SCMI 1100+ MHz crashes | SCMI gap: 1100 maps to 594 MHz, 1188 MHz crashes board | Capped at 1000 MHz |
 

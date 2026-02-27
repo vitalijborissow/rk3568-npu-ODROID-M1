@@ -280,8 +280,6 @@ int rknpu_devfreq_init(struct rknpu_device *rknpu_dev)
 {
 	struct device *dev = rknpu_dev->dev;
 	struct devfreq_simple_ondemand_data *ondemand_data;
-	struct dev_pm_opp *opp;
-	unsigned long freq;
 	int ret;
 	int i;
 
@@ -346,14 +344,6 @@ int rknpu_devfreq_init(struct rknpu_device *rknpu_dev)
 
 	/* Set initial values in profile */
 	rknpu_devfreq_profile.initial_freq = rknpu_dev->current_freq;
-
-	/* Find frequency range from OPP table */
-	freq = 0;
-	opp = dev_pm_opp_find_freq_ceil(dev, &freq);
-	if (!IS_ERR(opp)) {
-		rknpu_devfreq_profile.freq_table = NULL;
-		dev_pm_opp_put(opp);
-	}
 
 	/* Allocate and configure simple_ondemand governor data
 	 * upthreshold: Scale up when load exceeds this (default 90%)
