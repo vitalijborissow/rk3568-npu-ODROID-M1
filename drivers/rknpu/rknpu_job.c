@@ -378,16 +378,15 @@ static inline int rknpu_job_subcore_commit_pc(struct rknpu_job *job,
 	first_task = &task_base[task_start];
 	last_task = &task_base[task_end];
 
-	/* DEBUG: Log job submission details */
-	dev_info(rknpu_dev->dev,
-		 "RKNPU JOB: core=%d task_start=%d task_num=%d task_base=%px\n",
-		 core_index, task_start, task_number, task_base);
-	dev_info(rknpu_dev->dev,
-		 "RKNPU JOB: regcmd_addr=0x%llx int_mask=0x%x flags=0x%x\n",
-		 first_task->regcmd_addr, last_task->int_mask, args->flags);
-	dev_info(rknpu_dev->dev,
-		 "RKNPU JOB: task_base_addr=0x%llx use_drm_gem=%d\n",
-		 args->task_base_addr, job->use_drm_gem);
+	dev_dbg(rknpu_dev->dev,
+		"RKNPU JOB: core=%d task_start=%d task_num=%d task_base=%px\n",
+		core_index, task_start, task_number, task_base);
+	dev_dbg(rknpu_dev->dev,
+		"RKNPU JOB: regcmd_addr=0x%llx int_mask=0x%x flags=0x%x\n",
+		first_task->regcmd_addr, last_task->int_mask, args->flags);
+	dev_dbg(rknpu_dev->dev,
+		"RKNPU JOB: task_base_addr=0x%llx use_drm_gem=%d\n",
+		args->task_base_addr, job->use_drm_gem);
 
 	if (rknpu_dev->config->pc_dma_ctrl) {
 		spin_lock_irqsave(&rknpu_dev->irq_lock, flags);

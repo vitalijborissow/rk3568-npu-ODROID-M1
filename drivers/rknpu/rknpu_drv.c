@@ -637,15 +637,18 @@ static long rknpu_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 	rknpu_dev = ((struct rknpu_session *)file->private_data)->rknpu_dev;
 
-	rknpu_power_get(rknpu_dev);
-
 	switch (_IOC_NR(cmd)) {
 	case RKNPU_ACTION:
+		rknpu_power_get(rknpu_dev);
 		ret = rknpu_miscdev_action_ioctl(rknpu_dev, arg);
+		rknpu_power_put_delay(rknpu_dev);
 		break;
 	case RKNPU_SUBMIT:
+		rknpu_power_get(rknpu_dev);
 		ret = rknpu_miscdev_submit_ioctl(rknpu_dev, arg);
+		rknpu_power_put_delay(rknpu_dev);
 		break;
+	/* GEM/MEM ops don't need NPU power — only DMA/IOMMU access */
 	case RKNPU_MEM_CREATE:
 		ret = rknpu_mem_create_ioctl(rknpu_dev, file, cmd, arg);
 		break;
@@ -660,8 +663,6 @@ static long rknpu_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	default:
 		break;
 	}
-
-	rknpu_power_put_delay(rknpu_dev);
 
 	return ret;
 }
@@ -705,12 +706,20 @@ static int rknpu_action_ioctl(struct drm_device *dev, void *data,
 		return ret;                                                 \
 	}
 
+/* GEM ioctls don't need NPU power — only DMA/IOMMU access */
+#define RKNPU_IOCTL_NOPOWER(func)                                           \
+	static int __##func(struct drm_device *dev, void *data,             \
+			    struct drm_file *file_priv)                     \
+	{                                                                   \
+		return func(dev, data, file_priv);                           \
+	}
+
 RKNPU_IOCTL(rknpu_action_ioctl);
 RKNPU_IOCTL(rknpu_submit_ioctl);
-RKNPU_IOCTL(rknpu_gem_create_ioctl);
-RKNPU_IOCTL(rknpu_gem_map_ioctl);
-RKNPU_IOCTL(rknpu_gem_destroy_ioctl);
-RKNPU_IOCTL(rknpu_gem_sync_ioctl);
+RKNPU_IOCTL_NOPOWER(rknpu_gem_create_ioctl);
+RKNPU_IOCTL_NOPOWER(rknpu_gem_map_ioctl);
+RKNPU_IOCTL_NOPOWER(rknpu_gem_destroy_ioctl);
+RKNPU_IOCTL_NOPOWER(rknpu_gem_sync_ioctl);
 
 static const struct drm_ioctl_desc rknpu_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(RKNPU_ACTION, __rknpu_action_ioctl, DRM_RENDER_ALLOW),
@@ -981,14 +990,13 @@ static int rknpu_power_on(struct rknpu_device *rknpu_dev)
 		return ret;
 	}
 
-	/* DEBUG: Log clock enable success and rates */
 	{
 		int i;
-		dev_info(dev, "RKNPU POWER_ON: clocks enabled (%d clks)\n", rknpu_dev->num_clks);
+		dev_dbg(dev, "RKNPU POWER_ON: clocks enabled (%d clks)\n", rknpu_dev->num_clks);
 		for (i = 0; i < rknpu_dev->num_clks && i < 4; i++) {
 			if (rknpu_dev->clks[i].clk) {
-				dev_info(dev, "RKNPU POWER_ON: clk[%d] rate=%lu Hz\n",
-					 i, clk_get_rate(rknpu_dev->clks[i].clk));
+				dev_dbg(dev, "RKNPU POWER_ON: clk[%d] rate=%lu Hz\n",
+					i, clk_get_rate(rknpu_dev->clks[i].clk));
 			}
 		}
 	}

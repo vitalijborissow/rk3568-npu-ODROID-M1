@@ -1065,7 +1065,7 @@ int rknpu_gem_create_ioctl(struct drm_device *drm, void *data,
 	args->dma_addr = rknpu_obj->dma_addr;
 
 #ifdef RKNPU_DKMS
-	LOG_ERROR(
+	LOG_DEBUG(
 		"DKMS: GEM_CREATE handle=%u flags=%#x req_size=%llu alloc_size=%lu obj=%p dma_addr=%#llx iova_start=%#llx iova_size=%#lx domain_id=%d core_mask=%#x\n",
 		args->handle, args->flags, (unsigned long long)args->size,
 		rknpu_obj->size, rknpu_obj,
@@ -1855,7 +1855,7 @@ int rknpu_gem_sync_ioctl(struct drm_device *dev, void *data,
 		return -EINVAL;
 
 #ifdef RKNPU_DKMS
-	LOG_ERROR(
+	LOG_DEBUG(
 		"DKMS: MEM_SYNC obj=%p dma_addr=%#llx size=%llu offset=%llu flags=%#x obj_flags=%#x noncontig=%d\n",
 		rknpu_obj, (unsigned long long)rknpu_obj->dma_addr,
 		(unsigned long long)args->size,
@@ -1899,7 +1899,7 @@ int rknpu_gem_sync_ioctl(struct drm_device *dev, void *data,
 						 rknpu_obj->sgt->nents,
 						 DMA_FROM_DEVICE);
 			}
-			LOG_ERROR(
+			LOG_DEBUG(
 				"DKMS: MEM_SYNC sg sync nents=%u flags=%#x\n",
 				rknpu_obj->sgt->nents, args->flags);
 		}
