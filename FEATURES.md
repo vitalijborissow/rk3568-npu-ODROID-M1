@@ -93,8 +93,8 @@
 | # | Model | Frequency | Avg Latency | FPS |
 |---|-------|-----------|-------------|-----|
 | 48 | YOLOv5s 640×640 (C API) | 600 MHz | 49.1 ms | 20.4 |
-| 49 | YOLOv5s 640×640 (C API) | 1000 MHz | 39.8 ms | 25.1 |
-| 50 | YOLOv5s 640×640 (C API, devfreq) | auto | 55.8 ms | 17.9 |
+| 49 | YOLOv5s 640×640 (C API) | 1000 MHz | 43.6 ms | 22.9 |
+| 50 | YOLOv5s 640×640 (C API, devfreq) | auto | 43.8 ms | 22.8 |
 | 51 | YOLOv5s 640×640 (Python) | 600 MHz | 96.3 ms | 10.4 |
 | 52 | YOLO11n | 600 MHz | ~4.1 ms | ~241 |
 | 53 | YOLO11n | 1000 MHz | ~3.1 ms | ~321 |
