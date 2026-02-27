@@ -36,7 +36,6 @@
 
 #define RKNPU_DEVFREQ_POLLING_MS 50
 #define RKNPU_MAX_FREQ     1000000000UL   /* 1000 MHz - safe SCMI max */
-#define RKNPU_DEFAULT_FREQ  600000000UL   /* 600 MHz */
 
 static int rknpu_devfreq_target(struct device *dev, unsigned long *freq,
 				u32 flags)
@@ -172,6 +171,8 @@ int rknpu_devfreq_init(struct rknpu_device *rknpu_dev)
 	if (ret)
 		dev_warn(dev, "OPP table not found in DT: %d\n", ret);
 
+	/* Set SCMI clock to lowest OPP before devfreq registration */
+	clk_set_rate(rknpu_dev->scmi_clk, 200000000UL);
 	rknpu_dev->current_freq = clk_get_rate(rknpu_dev->scmi_clk);
 	dev_info(dev, "RKNPU: SCMI clock %lu MHz\n",
 		 rknpu_dev->current_freq / 1000000);

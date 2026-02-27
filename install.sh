@@ -154,27 +154,16 @@ ACTION=="add", SUBSYSTEM=="dma_heap", KERNEL=="dma32", RUN+="/bin/sh -c 'rm -f /
 EOF
 echo "  Udev rules installed (DMA heap → dma32)."
 
-# Unlock devfreq to full OPP range (200-1000 MHz)
+# Clean up stale devfreq services that may clamp NPU frequency
 rm -f /etc/udev/rules.d/99-rknpu-devfreq.rules
 rm -f /etc/modprobe.d/rknpu-devfreq.conf
-cat > /etc/systemd/system/rknpu-devfreq.service << 'EOF'
-[Unit]
-Description=Unlock NPU devfreq OPP range
-ConditionPathExists=/sys/class/devfreq/fde40000.npu/min_freq
-After=multi-user.target
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStartPre=/bin/sleep 5
-ExecStart=/bin/sh -c 'echo 200000000 > /sys/class/devfreq/fde40000.npu/min_freq; echo 1000000000 > /sys/class/devfreq/fde40000.npu/max_freq'
-
-[Install]
-WantedBy=multi-user.target
-EOF
+for svc in rknpu-devfreq npu-performance; do
+    systemctl disable "$svc.service" 2>/dev/null
+    systemctl stop "$svc.service" 2>/dev/null
+    rm -f "/etc/systemd/system/$svc.service"
+done
 systemctl daemon-reload
-systemctl enable rknpu-devfreq.service 2>/dev/null
-echo "  Devfreq unlock service installed (200-1000 MHz)."
+echo "  Stale devfreq services removed (range managed by driver OPP table)."
 
 echo "[6/6] Removing any stale blacklists..."
 rm -f /etc/modprobe.d/blacklist-rknpu.conf

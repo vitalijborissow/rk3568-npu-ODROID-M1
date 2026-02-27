@@ -17,7 +17,7 @@
 | 4 | Fence sync | `-DCONFIG_ROCKCHIP_RKNPU_FENCE` | ✅ | ✅ Working | DRM syncobj/sync_file support |
 | 5 | Procfs `/proc/rknpu/` | `-DCONFIG_ROCKCHIP_RKNPU_PROC_FS` | ✅ | ✅ Working | 8 entries: version, freq, load, power, volt, mm, reset, delayms |
 | 6 | Debugfs `/sys/kernel/debug/rknpu/` | `-DCONFIG_ROCKCHIP_RKNPU_DEBUG_FS` | ✅ | ✅ Working | 14 entries incl. clock_source, opp_bypass, freq_hz, voltage_mv |
-| 7 | Devfreq (DVFS) | `-DCONFIG_PM_DEVFREQ` | ✅ | ✅ Working | 4 governors: simple_ondemand (default), performance, powersave, userspace. SCMI-only clocking (200–1000 MHz). Full OPP range unlocked at boot via systemd oneshot. |
+| 7 | Devfreq (DVFS) | `-DCONFIG_PM_DEVFREQ` | ✅ | ✅ Working | 4 governors: simple_ondemand (default), performance, powersave, userspace. SCMI-only clocking (200–1000 MHz). Full OPP range at boot — no external service needed. |
 | 8 | SRAM support | `RKNPU_SRAM_PERCENT=100` | ✅ | ✅ Working | 44 KB shared with rkvdec. 0=all video, 50=split, 100=all NPU (default) |
 
 ---
@@ -94,9 +94,10 @@
 |---|-------|-----------|-------------|-----|
 | 48 | YOLOv5s 640×640 (C API) | 600 MHz | 49.1 ms | 20.4 |
 | 49 | YOLOv5s 640×640 (C API) | 1000 MHz | 39.8 ms | 25.1 |
-| 50 | YOLOv5s 640×640 (Python) | 600 MHz | 96.3 ms | 10.4 |
-| 51 | YOLO11n | 600 MHz | ~4.1 ms | ~241 |
-| 52 | YOLO11n | 1000 MHz | ~3.1 ms | ~321 |
+| 50 | YOLOv5s 640×640 (C API, devfreq) | auto | 55.8 ms | 17.9 |
+| 51 | YOLOv5s 640×640 (Python) | 600 MHz | 96.3 ms | 10.4 |
+| 52 | YOLO11n | 600 MHz | ~4.1 ms | ~241 |
+| 53 | YOLO11n | 1000 MHz | ~3.1 ms | ~321 |
 
 **Note:** C API measures `rknn_run()` only. Python includes ~47 ms rknnlite wrapper overhead.
 
@@ -128,7 +129,6 @@
 | 65 | DRM path ~50% slower than misc device | Use `/dev/rknpu` for best performance | Both paths available; misc device supports direct alloc |
 | 66 | SCMI freq accuracy | SCMI gives approximate values at low end (198/297/396 vs 200/300/400 MHz) | Cosmetic only |
 | 67 | SCMI 1100+ MHz crashes | SCMI gap: 1100 maps to 594 MHz, 1188 MHz crashes board | Capped at 1000 MHz |
-| 68 | Devfreq boots clamped to 600 MHz | Armbian 6.18 kernel quirk; devfreq core clamps min=max to boot freq | Systemd oneshot writes OPP range to sysfs after boot |
 
 ---
 
@@ -149,6 +149,5 @@ No `fdtfile` override (stock Armbian DTB), no `extraargs`, no `mem=3584M`. Full 
 | `/etc/modules-load.d/rknpu.conf` | Autoload rknpu module at boot |
 | `/etc/modules-load.d/dma32-heap.conf` | Autoload dma32_heap module at boot |
 | `/etc/udev/rules.d/99-dma-heap-dma32.rules` | Symlink `/dev/dma_heap/system` → `dma32` |
-| `/etc/systemd/system/rknpu-devfreq.service` | Unlock devfreq OPP range (200–1000 MHz) at boot |
 | `/boot/overlay-user/rknpu.dtbo` | DT overlay: PD6, vdd_npu, power-domains, rknpu-supply |
 
