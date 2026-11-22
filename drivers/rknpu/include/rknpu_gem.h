@@ -163,6 +163,7 @@ int rknpu_gem_sync_ioctl(struct drm_device *dev, void *data,
 #ifdef RKNPU_DKMS
 int rknpu_dkms_gem_range_cache_init(void);
 void rknpu_dkms_gem_range_cache_destroy(void);
+void rknpu_dkms_gem_orphans_stop(void);
 #else
 static inline int rknpu_dkms_gem_range_cache_init(void)
 {
@@ -170,6 +171,10 @@ static inline int rknpu_dkms_gem_range_cache_init(void)
 }
 
 static inline void rknpu_dkms_gem_range_cache_destroy(void)
+{
+}
+
+static inline void rknpu_dkms_gem_orphans_stop(void)
 {
 }
 #endif
