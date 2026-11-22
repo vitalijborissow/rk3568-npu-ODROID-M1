@@ -82,7 +82,7 @@
 | Misc-session object-address hash | ✅ Working | Speeds object lookup by `obj_addr` |
 | Single-SG MEM_SYNC fast path | ✅ Working | Uses `dma_sync_single_range_*` when `sgt->nents == 1` |
 | Busy-time devfreq status | ✅ Working | Uses sampled busy time with active fallback when sampled load is zero |
-| GEM contiguous allocation | ✅ Forced | `dkms_force_contig_alloc=Y` by default |
+| GEM non-contiguous allocation | ✅ Working | Cacheable shmem pages through the IOMMU (`RKNPU_GEM_ALLOC_FROM_PAGES`); `dkms_force_contig_alloc=N` by default |
 
 ---
 
@@ -90,7 +90,7 @@
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `dkms_force_contig_alloc` | `Y` | Force contiguous DMA allocations and ignore `RKNPU_MEM_NON_CONTIGUOUS` |
+| `dkms_force_contig_alloc` | `N` | Force contiguous DMA allocations and ignore `RKNPU_MEM_NON_CONTIGUOUS` (contiguous buffers are mapped uncached for the CPU) |
 | `power_put_delay_ms` | `500` | Delay before powering off the NPU after the last job |
 
 ---

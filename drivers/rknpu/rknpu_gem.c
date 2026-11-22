@@ -35,7 +35,7 @@
 #include "rknpu_gem.h"
 
 #ifdef RKNPU_DKMS
-static bool dkms_force_contig_alloc = true;
+static bool dkms_force_contig_alloc = false;
 module_param(dkms_force_contig_alloc, bool, 0644);
 MODULE_PARM_DESC(
 	dkms_force_contig_alloc,
@@ -330,7 +330,13 @@ static void rknpu_dkms_untrack_gem_obj(struct rknpu_gem_object *obj)
 }
 #endif
 
-#define RKNPU_GEM_ALLOC_FROM_PAGES 0
+/*
+ * Back RKNPU_MEM_NON_CONTIGUOUS objects with shmem pages mapped through the IOMMU. These keep a cacheable
+ * user mapping. Allocations through dma_alloc_attrs() are mapped with dma_mmap_attrs(), which applies
+ * dma_pgprot() (Normal Non-Cacheable) on mainline: DMA_ATTR_NON_CONSISTENT no longer exists, so the CPU read
+ * those buffers uncached and every op that librknnrt runs on the CPU was ~10x slower.
+ */
+#define RKNPU_GEM_ALLOC_FROM_PAGES 1
 
 #if RKNPU_GEM_ALLOC_FROM_PAGES
 static int rknpu_gem_get_pages(struct rknpu_gem_object *rknpu_obj)
@@ -523,6 +529,17 @@ static int rknpu_gem_alloc_buf(struct rknpu_gem_object *rknpu_obj)
 				drm->dev,
 				"try to fallback to allocate non-contiguous %lu buffer.\n",
 				rknpu_obj->size);
+#if RKNPU_GEM_ALLOC_FROM_PAGES
+			/*
+			 * free_buf, mmap and sync choose the shmem path from
+			 * RKNPU_MEM_NON_CONTIGUOUS, so the fallback must
+			 * allocate through it too.
+			 */
+			rknpu_gem_free_page(rknpu_obj->pages);
+			rknpu_obj->pages = NULL;
+			rknpu_obj->flags |= RKNPU_MEM_NON_CONTIGUOUS;
+			return rknpu_gem_get_pages(rknpu_obj);
+#else
 			rknpu_obj->dma_attrs &= ~DMA_ATTR_FORCE_CONTIGUOUS;
 			rknpu_obj->flags |= RKNPU_MEM_NON_CONTIGUOUS;
 			rknpu_obj->cookie = dma_alloc_attrs(
@@ -535,6 +552,7 @@ static int rknpu_gem_alloc_buf(struct rknpu_gem_object *rknpu_obj)
 					rknpu_obj->size);
 				goto err_free;
 			}
+#endif
 		} else {
 			LOG_DEV_ERROR(drm->dev,
 				      "failed to allocate %lu buffer.\n",
@@ -610,6 +628,7 @@ static void rknpu_gem_free_buf(struct rknpu_gem_object *rknpu_obj)
 	if ((rknpu_obj->flags & RKNPU_MEM_NON_CONTIGUOUS) &&
 	    rknpu_dev_pages->iommu_en) {
 		rknpu_gem_put_pages(rknpu_obj);
+		rknpu_obj->dma_addr = 0;
 		return;
 	}
 #endif
