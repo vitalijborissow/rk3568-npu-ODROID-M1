@@ -1861,7 +1861,8 @@ int rknpu_gem_sync_ioctl(struct drm_device *dev, void *data,
 		WARN_ON(!rknpu_dev->fake_dev);
 
 #ifdef RKNPU_DKMS
-		if (rknpu_obj->sgt) {
+		/* whole-buffer fallback only without fake_dev; the range loop below syncs the exact range */
+		if (rknpu_obj->sgt && !rknpu_dev->fake_dev) {
 			if (args->flags & RKNPU_MEM_SYNC_TO_DEVICE) {
 				dma_sync_sg_for_device(dev->dev, rknpu_obj->sgt->sgl,
 							rknpu_obj->sgt->nents,
