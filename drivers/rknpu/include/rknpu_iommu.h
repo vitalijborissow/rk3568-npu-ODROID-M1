@@ -14,15 +14,12 @@
 
 #include "rknpu_drv.h"
 
-enum iommu_dma_cookie_type {
-	IOMMU_DMA_IOVA_COOKIE,
-	IOMMU_DMA_MSI_COOKIE,
-};
-
+/*
+ * Mirror of the head of the kernel's private struct iommu_dma_cookie (drivers/iommu/dma-iommu.c).
+ * Since Linux 6.15 the IOVA domain is its first member: the old leading "type" field is gone, and with it
+ * every rknpu_iommu_dma_alloc_iova() call used a pointer 8 bytes into the real iova_domain.
+ */
 struct rknpu_iommu_dma_cookie {
-	enum iommu_dma_cookie_type type;
-
-	/* Full allocator for IOMMU_DMA_IOVA_COOKIE */
 	struct iova_domain iovad;
 };
 
