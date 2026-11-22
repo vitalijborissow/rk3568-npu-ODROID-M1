@@ -16,6 +16,7 @@
 #include <drm/drm_drv.h>
 
 #include <linux/delay.h>
+#include <linux/workqueue.h>
 #include <linux/shmem_fs.h>
 #include <linux/dma-buf.h>
 #include <linux/iommu.h>
@@ -34,7 +35,7 @@
 #include "rknpu_gem.h"
 
 #ifdef RKNPU_DKMS
-static bool dkms_force_contig_alloc = true;
+static bool dkms_force_contig_alloc = false;
 module_param(dkms_force_contig_alloc, bool, 0644);
 MODULE_PARM_DESC(
 	dkms_force_contig_alloc,
@@ -59,6 +60,7 @@ struct rknpu_dkms_gem_range {
 	unsigned long size;
 	struct rknpu_dkms_gem_page_slot *page_slots;
 	unsigned int nr_page_slots;
+	bool orphaned;		/* last handle closed without the destroy ioctl */
 };
 
 static struct kmem_cache *rknpu_dkms_gem_range_cache;
@@ -205,6 +207,107 @@ static void rknpu_dkms_track_gem_obj(struct rknpu_gem_object *obj)
 	spin_unlock_irqrestore(&rknpu_dkms_gem_ranges_lock, flags);
 }
 
+/*
+ * Buffers of a file that closed without destroying them ("orphans"). Jobs hold a reference only on the task
+ * object and reach the other buffers through their IOVA, so an async job of that file may still use them: drop
+ * the tracking reference from a work item once the NPU has no queued or running job, never from the release path.
+ */
+#define RKNPU_DKMS_ORPHAN_POLL_MS 50
+
+static struct rknpu_device *rknpu_dkms_orphan_dev;
+static void rknpu_dkms_reap_orphans_work(struct work_struct *work);
+static DECLARE_DELAYED_WORK(rknpu_dkms_orphan_work, rknpu_dkms_reap_orphans_work);
+
+static bool rknpu_dkms_npu_idle(struct rknpu_device *rknpu_dev)
+{
+	unsigned long flags;
+	bool idle = true;
+	int i;
+
+	spin_lock_irqsave(&rknpu_dev->irq_lock, flags);
+	for (i = 0; i < rknpu_dev->config->num_irqs; i++) {
+		if (rknpu_dev->subcore_datas[i].job ||
+		    !list_empty(&rknpu_dev->subcore_datas[i].todo_list))
+			idle = false;
+	}
+	spin_unlock_irqrestore(&rknpu_dev->irq_lock, flags);
+
+	return idle;
+}
+
+/* Mark obj orphaned; false if it is not tracked (the destroy ioctl already untracked it). */
+static bool rknpu_dkms_orphan_gem_obj(struct rknpu_gem_object *obj)
+{
+	struct rknpu_dkms_gem_range *r;
+	unsigned long flags;
+	bool found = false;
+
+	spin_lock_irqsave(&rknpu_dkms_gem_ranges_lock, flags);
+	list_for_each_entry(r, &rknpu_dkms_gem_ranges, list) {
+		if (r->obj == obj) {
+			r->orphaned = true;
+			found = true;
+			break;
+		}
+	}
+	spin_unlock_irqrestore(&rknpu_dkms_gem_ranges_lock, flags);
+
+	return found;
+}
+
+static void rknpu_dkms_reap_orphans(void)
+{
+	struct rknpu_dkms_gem_range *r, *q;
+	LIST_HEAD(reaped);
+	unsigned long flags;
+	unsigned int i;
+
+	spin_lock_irqsave(&rknpu_dkms_gem_ranges_lock, flags);
+	list_for_each_entry_safe(r, q, &rknpu_dkms_gem_ranges, list) {
+		if (!r->orphaned)
+			continue;
+		for (i = 0; i < r->nr_page_slots; i++)
+			hash_del(&r->page_slots[i].node);
+		list_move(&r->list, &reaped);
+	}
+	spin_unlock_irqrestore(&rknpu_dkms_gem_ranges_lock, flags);
+
+	/* the tracking reference may be the last one: drop it outside the spinlock */
+	list_for_each_entry_safe(r, q, &reaped, list) {
+		list_del(&r->list);
+		rknpu_gem_object_put(&r->obj->base);
+		kfree(r->page_slots);
+		kmem_cache_free(rknpu_dkms_gem_range_cache, r);
+	}
+}
+
+static void rknpu_dkms_reap_orphans_work(struct work_struct *work)
+{
+	struct rknpu_device *rknpu_dev = READ_ONCE(rknpu_dkms_orphan_dev);
+
+	if (rknpu_dev && !rknpu_dkms_npu_idle(rknpu_dev)) {
+		schedule_delayed_work(&rknpu_dkms_orphan_work,
+				      msecs_to_jiffies(RKNPU_DKMS_ORPHAN_POLL_MS));
+		return;
+	}
+	rknpu_dkms_reap_orphans();
+}
+
+/* Module exit, before the device goes away: stop the work and free the remaining orphans. */
+void rknpu_dkms_gem_orphans_stop(void)
+{
+	struct rknpu_device *rknpu_dev = READ_ONCE(rknpu_dkms_orphan_dev);
+	unsigned int waited_ms = 0;
+
+	cancel_delayed_work_sync(&rknpu_dkms_orphan_work);
+	while (rknpu_dev && !rknpu_dkms_npu_idle(rknpu_dev) && waited_ms < 15000) {
+		msleep(10);
+		waited_ms += 10;
+	}
+	rknpu_dkms_reap_orphans();
+	WRITE_ONCE(rknpu_dkms_orphan_dev, NULL);
+}
+
 static void rknpu_dkms_untrack_gem_obj(struct rknpu_gem_object *obj)
 {
 	struct rknpu_dkms_gem_range *r, *q;
@@ -227,7 +330,13 @@ static void rknpu_dkms_untrack_gem_obj(struct rknpu_gem_object *obj)
 }
 #endif
 
-#define RKNPU_GEM_ALLOC_FROM_PAGES 0
+/*
+ * Back RKNPU_MEM_NON_CONTIGUOUS objects with shmem pages mapped through the IOMMU. These keep a cacheable
+ * user mapping. Allocations through dma_alloc_attrs() are mapped with dma_mmap_attrs(), which applies
+ * dma_pgprot() (Normal Non-Cacheable) on mainline: DMA_ATTR_NON_CONSISTENT no longer exists, so the CPU read
+ * those buffers uncached and every op that librknnrt runs on the CPU was ~10x slower.
+ */
+#define RKNPU_GEM_ALLOC_FROM_PAGES 1
 
 #if RKNPU_GEM_ALLOC_FROM_PAGES
 static int rknpu_gem_get_pages(struct rknpu_gem_object *rknpu_obj)
@@ -420,6 +529,17 @@ static int rknpu_gem_alloc_buf(struct rknpu_gem_object *rknpu_obj)
 				drm->dev,
 				"try to fallback to allocate non-contiguous %lu buffer.\n",
 				rknpu_obj->size);
+#if RKNPU_GEM_ALLOC_FROM_PAGES
+			/*
+			 * free_buf, mmap and sync choose the shmem path from
+			 * RKNPU_MEM_NON_CONTIGUOUS, so the fallback must
+			 * allocate through it too.
+			 */
+			rknpu_gem_free_page(rknpu_obj->pages);
+			rknpu_obj->pages = NULL;
+			rknpu_obj->flags |= RKNPU_MEM_NON_CONTIGUOUS;
+			return rknpu_gem_get_pages(rknpu_obj);
+#else
 			rknpu_obj->dma_attrs &= ~DMA_ATTR_FORCE_CONTIGUOUS;
 			rknpu_obj->flags |= RKNPU_MEM_NON_CONTIGUOUS;
 			rknpu_obj->cookie = dma_alloc_attrs(
@@ -432,6 +552,7 @@ static int rknpu_gem_alloc_buf(struct rknpu_gem_object *rknpu_obj)
 					rknpu_obj->size);
 				goto err_free;
 			}
+#endif
 		} else {
 			LOG_DEV_ERROR(drm->dev,
 				      "failed to allocate %lu buffer.\n",
@@ -507,6 +628,7 @@ static void rknpu_gem_free_buf(struct rknpu_gem_object *rknpu_obj)
 	if ((rknpu_obj->flags & RKNPU_MEM_NON_CONTIGUOUS) &&
 	    rknpu_dev_pages->iommu_en) {
 		rknpu_gem_put_pages(rknpu_obj);
+		rknpu_obj->dma_addr = 0;
 		return;
 	}
 #endif
@@ -560,8 +682,33 @@ static const struct vm_operations_struct vm_ops = {
 	.close = drm_gem_vm_close,
 };
 
+/*
+ * DRM calls .close for every handle release: from the destroy ioctl and from drm_gem_release() when the file
+ * closes, for example after the process was killed. The DKMS address tracking holds its own object reference,
+ * which only the destroy ioctl dropped, so a process that ended without freeing its buffers leaked all of them
+ * until reboot. The destroy ioctl untracks before it releases the handle, so an object that is still tracked at
+ * its last handle belongs to a file that closes without freeing it: hand it to the orphan work. Never sleeps.
+ */
+static void rknpu_gem_close_object(struct drm_gem_object *obj, struct drm_file *file)
+{
+#ifdef RKNPU_DKMS
+	bool last;
+
+	mutex_lock(&obj->dev->object_name_lock);
+	last = obj->handle_count <= 1;
+	mutex_unlock(&obj->dev->object_name_lock);
+
+	if (!last || !rknpu_dkms_orphan_gem_obj(to_rknpu_obj(obj)))
+		return;
+
+	WRITE_ONCE(rknpu_dkms_orphan_dev, obj->dev->dev_private);
+	schedule_delayed_work(&rknpu_dkms_orphan_work, 0);
+#endif
+}
+
 static const struct drm_gem_object_funcs rknpu_gem_object_funcs = {
 	.free = rknpu_gem_free_object,
+	.close = rknpu_gem_close_object,
 	.export = drm_gem_prime_export,
 	.get_sg_table = rknpu_gem_prime_get_sg_table,
 	.vmap = rknpu_gem_prime_vmap,
@@ -1733,7 +1880,8 @@ int rknpu_gem_sync_ioctl(struct drm_device *dev, void *data,
 		WARN_ON(!rknpu_dev->fake_dev);
 
 #ifdef RKNPU_DKMS
-		if (rknpu_obj->sgt) {
+		/* whole-buffer fallback only without fake_dev; the range loop below syncs the exact range */
+		if (rknpu_obj->sgt && !rknpu_dev->fake_dev) {
 			if (args->flags & RKNPU_MEM_SYNC_TO_DEVICE) {
 				dma_sync_sg_for_device(dev->dev, rknpu_obj->sgt->sgl,
 							rknpu_obj->sgt->nents,

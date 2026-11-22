@@ -1567,6 +1567,7 @@ static int rknpu_init(void)
 
 static void rknpu_exit(void)
 {
+	rknpu_dkms_gem_orphans_stop();
 	platform_driver_unregister(&rknpu_driver);
 	rknpu_dkms_gem_range_cache_destroy();
 	rknpu_job_cache_destroy();
